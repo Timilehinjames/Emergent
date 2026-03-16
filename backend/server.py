@@ -668,6 +668,79 @@ async def get_store_locations():
         })
     return locations
 
+# ============ SHOPPING LISTS ============
+
+@api_router.post("/shopping-lists")
+async def create_shopping_list(request: Request):
+    user = await get_current_user(request)
+    body = await request.json()
+    list_name = body.get("name", "My Shopping List")
+    items = body.get("items", [])
+    list_id = f"list_{uuid.uuid4().hex[:8]}"
+    list_doc = {
+        "list_id": list_id,
+        "user_id": user["user_id"],
+        "name": list_name,
+        "items": items,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.shopping_lists.insert_one(list_doc)
+    list_doc.pop("_id", None)
+    return list_doc
+
+@api_router.get("/shopping-lists")
+async def get_shopping_lists(request: Request):
+    user = await get_current_user(request)
+    lists = await db.shopping_lists.find(
+        {"user_id": user["user_id"]},
+        {"_id": 0}
+    ).sort("updated_at", -1).to_list(50)
+    return lists
+
+@api_router.put("/shopping-lists/{list_id}")
+async def update_shopping_list(list_id: str, request: Request):
+    user = await get_current_user(request)
+    body = await request.json()
+    update_fields = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if "name" in body:
+        update_fields["name"] = body["name"]
+    if "items" in body:
+        update_fields["items"] = body["items"]
+    result = await db.shopping_lists.update_one(
+        {"list_id": list_id, "user_id": user["user_id"]},
+        {"$set": update_fields}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="List not found")
+    updated = await db.shopping_lists.find_one({"list_id": list_id}, {"_id": 0})
+    return updated
+
+@api_router.delete("/shopping-lists/{list_id}")
+async def delete_shopping_list(list_id: str, request: Request):
+    user = await get_current_user(request)
+    result = await db.shopping_lists.delete_one({"list_id": list_id, "user_id": user["user_id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="List not found")
+    return {"message": "List deleted"}
+
+@api_router.get("/product-categories")
+async def get_product_categories():
+    """Returns products grouped by category for the shopping list builder."""
+    products = await db.products.find({}, {"_id": 0}).to_list(200)
+    categories = {}
+    for p in products:
+        cat = p.get("category", "General")
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append({
+            "product_id": p["product_id"],
+            "name": p["name"],
+            "brand": p.get("brand", ""),
+            "unit_type": p.get("unit_type", "each")
+        })
+    return categories
+
 # ============ DATABASE SEEDING ============
 
 async def seed_database():

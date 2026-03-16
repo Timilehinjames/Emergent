@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
-import { Spacing, Radius, Shadows } from '../../src/constants/theme';
+import { Spacing, Radius } from '../../src/constants/theme';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -17,6 +17,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const [savings, setSavings] = useState<any>(null);
   const [recentReports, setRecentReports] = useState<any[]>([]);
+  const [myLists, setMyLists] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -24,23 +25,21 @@ export default function HomeScreen() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const [savingsRes, reportsRes] = await Promise.all([
+      const [savingsRes, reportsRes, listsRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/savings-summary`, { headers }).then(r => r.ok ? r.json() : null),
-        fetch(`${BACKEND_URL}/api/price-reports/recent?limit=5`, { headers }).then(r => r.ok ? r.json() : []),
+        fetch(`${BACKEND_URL}/api/price-reports/recent?limit=3`, { headers }).then(r => r.ok ? r.json() : []),
+        fetch(`${BACKEND_URL}/api/shopping-lists`, { headers }).then(r => r.ok ? r.json() : []),
       ]);
       if (savingsRes) setSavings(savingsRes);
       setRecentReports(reportsRes || []);
-    } catch (e) {
-      console.log('Fetch error:', e);
-    } finally {
+      setMyLists(listsRes || []);
+    } catch {} finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
   const onRefresh = () => { setRefreshing(true); fetchData(); };
 
   const s = createStyles(colors);
@@ -63,87 +62,112 @@ export default function HomeScreen() {
         <View style={s.header}>
           <View>
             <Text style={s.greeting}>Hello, {user?.name?.split(' ')[0] || 'Shopper'}</Text>
-            <Text style={s.subGreeting}>{user?.region} Region</Text>
+            <Text style={s.subGreeting}>{user?.region}</Text>
           </View>
           <View style={s.pointsBadge}>
             <Ionicons name="star" size={16} color={colors.accent} />
-            <Text style={s.pointsText}>{user?.points || 0}</Text>
+            <Text style={s.pointsText}>{user?.points || 0} pts</Text>
           </View>
         </View>
 
-        {/* Savings Summary Bento Grid */}
-        <View style={s.bentoGrid}>
-          <View style={[s.bentoLarge, { backgroundColor: colors.primary }]}>
-            <Ionicons name="wallet" size={28} color={colors.primaryForeground} />
-            <Text style={[s.bentoLabel, { color: colors.primaryForeground + 'CC' }]}>This Month Saved</Text>
-            <Text style={[s.bentoValue, { color: colors.primaryForeground }]}>
-              ${savings?.this_month_savings?.toFixed(2) || '0.00'} TTD
+        {/* CTA — Start Shopping List */}
+        <TouchableOpacity
+          testID="start-shopping-list-btn"
+          style={s.ctaCard}
+          onPress={() => router.push('/shopping-list')}
+          activeOpacity={0.85}
+        >
+          <View style={s.ctaIconWrap}>
+            <Ionicons name="list" size={32} color={colors.primaryForeground} />
+          </View>
+          <View style={s.ctaTextWrap}>
+            <Text style={s.ctaTitle}>Start Shopping List</Text>
+            <Text style={s.ctaDesc}>Build your list, compare prices & save</Text>
+          </View>
+          <Ionicons name="arrow-forward-circle" size={32} color={colors.primaryForeground} />
+        </TouchableOpacity>
+
+        {/* Saved Lists */}
+        {myLists.length > 0 && (
+          <View style={s.savedSection}>
+            <Text style={s.sectionTitle}>My Lists</Text>
+            {myLists.slice(0, 3).map((list, i) => (
+              <TouchableOpacity
+                key={list.list_id}
+                testID={`saved-list-${i}`}
+                style={s.savedListCard}
+                onPress={() => router.push(`/shopping-list?listId=${list.list_id}`)}
+              >
+                <View style={s.savedListIcon}>
+                  <Ionicons name="document-text" size={20} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.savedListName}>{list.name}</Text>
+                  <Text style={s.savedListCount}>{list.items?.length || 0} items</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Savings at a Glance */}
+        <View style={s.savingsRow}>
+          <View style={[s.savingsCard, { backgroundColor: colors.primary }]}>
+            <Ionicons name="wallet" size={22} color={colors.primaryForeground} />
+            <Text style={[s.savingsValue, { color: colors.primaryForeground }]}>
+              ${savings?.this_month_savings?.toFixed(0) || '0'}
             </Text>
+            <Text style={[s.savingsLabel, { color: colors.primaryForeground + 'BB' }]}>Saved this month</Text>
           </View>
-          <View style={s.bentoColumn}>
-            <View style={[s.bentoSmall, { backgroundColor: colors.secondary }]}>
-              <Ionicons name="document-text" size={22} color={colors.secondaryForeground} />
-              <Text style={[s.bentoSmLabel, { color: colors.secondaryForeground + 'CC' }]}>Reports</Text>
-              <Text style={[s.bentoSmValue, { color: colors.secondaryForeground }]}>{savings?.total_reports || 0}</Text>
-            </View>
-            <View style={[s.bentoSmall, { backgroundColor: colors.accent }]}>
-              <Ionicons name="trending-up" size={22} color={colors.accentForeground} />
-              <Text style={[s.bentoSmLabel, { color: colors.accentForeground + 'CC' }]}>Total Saved</Text>
-              <Text style={[s.bentoSmValue, { color: colors.accentForeground }]}>${savings?.estimated_savings_ttd?.toFixed(0) || '0'}</Text>
-            </View>
+          <View style={[s.savingsCard, { backgroundColor: colors.secondary }]}>
+            <Ionicons name="document-text" size={22} color={colors.secondaryForeground} />
+            <Text style={[s.savingsValue, { color: colors.secondaryForeground }]}>
+              {savings?.total_reports || 0}
+            </Text>
+            <Text style={[s.savingsLabel, { color: colors.secondaryForeground + 'BB' }]}>Price reports</Text>
           </View>
         </View>
 
-        {/* Quick Actions */}
+        {/* Quick Actions — big, thumb-friendly buttons */}
         <Text style={s.sectionTitle}>Quick Actions</Text>
-        <View style={s.quickActions}>
+        <View style={s.actionsGrid}>
           {[
-            { icon: 'swap-horizontal', label: 'Compare\nPrices', color: colors.primary, route: '/(tabs)/compare' },
-            { icon: 'scan', label: 'Quick\nScan', color: colors.secondary, route: '/(tabs)/scan' },
-            { icon: 'car', label: 'Trip\nPlanner', color: colors.accent, route: '/(tabs)/compare' },
-            { icon: 'people', label: 'Leader\nboard', color: '#9C27B0', route: '/(tabs)/community' },
+            { icon: 'swap-horizontal', label: 'Compare Prices', color: colors.primary, route: '/(tabs)/compare' },
+            { icon: 'scan', label: 'Quick Scan', color: colors.secondary, route: '/(tabs)/scan' },
+            { icon: 'people', label: 'Leaderboard', color: '#9C27B0', route: '/(tabs)/community' },
+            { icon: 'car', label: 'Trip Planner', color: colors.accent, route: '/(tabs)/compare' },
           ].map((action, i) => (
             <TouchableOpacity
               key={i}
               testID={`quick-action-${i}`}
-              style={s.quickActionBtn}
+              style={s.actionCard}
               onPress={() => router.push(action.route as any)}
+              activeOpacity={0.8}
             >
-              <View style={[s.quickActionIcon, { backgroundColor: action.color + '18' }]}>
-                <Ionicons name={action.icon as any} size={24} color={action.color} />
+              <View style={[s.actionIcon, { backgroundColor: action.color + '18' }]}>
+                <Ionicons name={action.icon as any} size={26} color={action.color} />
               </View>
-              <Text style={s.quickActionLabel}>{action.label}</Text>
+              <Text style={s.actionLabel}>{action.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Recent Community Updates */}
-        <Text style={s.sectionTitle}>Recent Price Updates</Text>
-        {recentReports.length === 0 ? (
-          <View style={s.emptyCard}>
-            <Ionicons name="newspaper-outline" size={40} color={colors.textSecondary} />
-            <Text style={s.emptyText}>No recent price updates yet</Text>
-            <Text style={s.emptySubText}>Be the first to report a price!</Text>
-          </View>
-        ) : (
-          recentReports.map((report, i) => (
-            <View key={i} style={s.reportCard} testID={`recent-report-${i}`}>
-              <View style={s.reportRow}>
+        {/* Recent Price Updates — compact */}
+        {recentReports.length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>Recent Updates</Text>
+            {recentReports.map((report, i) => (
+              <View key={i} style={s.reportRow} testID={`recent-report-${i}`}>
+                <View style={s.reportDot} />
                 <View style={{ flex: 1 }}>
                   <Text style={s.reportProduct}>{report.product_name}</Text>
                   <Text style={s.reportStore}>{report.store_name}</Text>
                 </View>
-                <View style={s.reportPriceBox}>
-                  <Text style={s.reportPrice}>${report.price?.toFixed(2)}</Text>
-                  <Text style={s.reportUnit}>{report.unit_price ? `$${report.unit_price}/${report.unit}` : ''}</Text>
-                </View>
+                <Text style={s.reportPrice}>${report.price?.toFixed(2)}</Text>
               </View>
-              <View style={s.reportFooter}>
-                <Text style={s.reportReporter}>by {report.reporter_name}</Text>
-                <Text style={s.reportTime}>{new Date(report.created_at).toLocaleDateString()}</Text>
-              </View>
-            </View>
-          ))
+            ))}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -154,57 +178,83 @@ const createStyles = (colors: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollContent: { padding: Spacing.m, paddingBottom: Spacing.xxl },
+
+  // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.l },
-  greeting: { fontSize: 28, fontWeight: '800', color: colors.text, letterSpacing: -0.5 },
-  subGreeting: { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
+  greeting: { fontSize: 26, fontWeight: '800', color: colors.text, letterSpacing: -0.5 },
+  subGreeting: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
   pointsBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: colors.surface, paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: Radius.full, ...Shadows.card,
+    borderRadius: Radius.full,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
-  pointsText: { fontSize: 16, fontWeight: '700', color: colors.accent },
-  bentoGrid: { flexDirection: 'row', gap: Spacing.m, marginBottom: Spacing.l },
-  bentoLarge: {
-    flex: 1.2, borderRadius: Radius.xl, padding: Spacing.l,
-    justifyContent: 'space-between', minHeight: 160, ...Shadows.card,
+  pointsText: { fontSize: 15, fontWeight: '700', color: colors.accent },
+
+  // CTA
+  ctaCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.primary, borderRadius: Radius.xl,
+    padding: Spacing.l, gap: Spacing.m, marginBottom: Spacing.l,
+    shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3, shadowRadius: 20, elevation: 8,
   },
-  bentoColumn: { flex: 1, gap: Spacing.m },
-  bentoSmall: {
-    flex: 1, borderRadius: Radius.l, padding: Spacing.m,
-    justifyContent: 'space-between', ...Shadows.card,
+  ctaIconWrap: {
+    width: 56, height: 56, borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center', alignItems: 'center',
   },
-  bentoLabel: { fontSize: 13, fontWeight: '500', marginTop: Spacing.s },
-  bentoValue: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
-  bentoSmLabel: { fontSize: 11, fontWeight: '500', marginTop: 4 },
-  bentoSmValue: { fontSize: 20, fontWeight: '800' },
-  sectionTitle: { fontSize: 20, fontWeight: '700', color: colors.text, marginBottom: Spacing.m },
-  quickActions: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.l },
-  quickActionBtn: { alignItems: 'center', width: '22%' },
-  quickActionIcon: {
-    width: 56, height: 56, borderRadius: Radius.l,
-    justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.xs,
-  },
-  quickActionLabel: { fontSize: 11, fontWeight: '600', color: colors.textSecondary, textAlign: 'center', lineHeight: 14 },
-  emptyCard: {
-    backgroundColor: colors.surface, borderRadius: Radius.xl,
-    padding: Spacing.xl, alignItems: 'center', ...Shadows.card,
-  },
-  emptyText: { fontSize: 16, fontWeight: '600', color: colors.text, marginTop: Spacing.m },
-  emptySubText: { fontSize: 14, color: colors.textSecondary, marginTop: Spacing.xs },
-  reportCard: {
+  ctaTextWrap: { flex: 1 },
+  ctaTitle: { fontSize: 20, fontWeight: '800', color: colors.primaryForeground },
+  ctaDesc: { fontSize: 13, color: colors.primaryForeground + 'CC', marginTop: 2 },
+
+  // Saved lists
+  savedSection: { marginBottom: Spacing.l },
+  savedListCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
     backgroundColor: colors.surface, borderRadius: Radius.l,
-    padding: Spacing.m, marginBottom: Spacing.m, ...Shadows.card,
+    padding: Spacing.m, marginBottom: Spacing.s,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
   },
-  reportRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  reportProduct: { fontSize: 15, fontWeight: '700', color: colors.text },
-  reportStore: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
-  reportPriceBox: { alignItems: 'flex-end' },
-  reportPrice: { fontSize: 18, fontWeight: '800', color: colors.primary },
-  reportUnit: { fontSize: 11, color: colors.textSecondary },
-  reportFooter: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    marginTop: Spacing.s, paddingTop: Spacing.s, borderTopWidth: 1, borderTopColor: colors.border,
+  savedListIcon: {
+    width: 40, height: 40, borderRadius: 10,
+    backgroundColor: colors.primary + '15', justifyContent: 'center', alignItems: 'center',
   },
-  reportReporter: { fontSize: 12, color: colors.textSecondary },
-  reportTime: { fontSize: 12, color: colors.textSecondary },
+  savedListName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  savedListCount: { fontSize: 12, color: colors.textSecondary },
+
+  // Savings
+  savingsRow: { flexDirection: 'row', gap: Spacing.m, marginBottom: Spacing.l },
+  savingsCard: {
+    flex: 1, borderRadius: Radius.l, padding: Spacing.m, alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3,
+  },
+  savingsValue: { fontSize: 26, fontWeight: '800', marginTop: 4 },
+  savingsLabel: { fontSize: 11, fontWeight: '600', marginTop: 2 },
+
+  // Section
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: Spacing.m },
+
+  // Actions Grid
+  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.m, marginBottom: Spacing.l },
+  actionCard: {
+    width: '47%', backgroundColor: colors.surface, borderRadius: Radius.l,
+    padding: Spacing.m, alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+  },
+  actionIcon: {
+    width: 52, height: 52, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.s,
+  },
+  actionLabel: { fontSize: 13, fontWeight: '600', color: colors.text, textAlign: 'center' },
+
+  // Recent reports
+  reportRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
+    paddingVertical: Spacing.s, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  reportDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.secondary },
+  reportProduct: { fontSize: 14, fontWeight: '600', color: colors.text },
+  reportStore: { fontSize: 12, color: colors.textSecondary },
+  reportPrice: { fontSize: 16, fontWeight: '800', color: colors.primary },
 });

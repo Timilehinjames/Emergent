@@ -17,6 +17,15 @@ Community-driven shopping optimization mobile app for Trinidad & Tobago. Helps s
 - Google OAuth via Emergent Auth
 - Secure token storage with AsyncStorage
 
+### 2. Shopping List Builder (NEW)
+- Prominent "Start Shopping List" CTA on home dashboard
+- Categorized product browser (11 categories: Grains & Rice, Cooking Oil, Baking, Meat & Poultry, Dairy, Toiletries, Cleaning, Personal Care, Beverages, Snacks, General)
+- Tap to add products from categories with checkbox toggle
+- Add custom items not in the catalog
+- Quantity +/- controls per item
+- Save, update, and delete lists
+- Saved lists accessible from home dashboard "My Lists" section
+
 ### 2. Unit Price Comparison (Bulk vs Retail)
 - Normalize different package sizes to standard unit prices (per 100g, per L, etc.)
 - Compare across T&T stores: Massy, PriceSmart, Pennywise, Hi-Lo, JTA

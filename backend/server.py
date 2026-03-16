@@ -23,7 +23,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-JWT_SECRET = os.environ.get('JWT_SECRET', 'trinisaver-jwt-secret-key-2026')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'trinisaver-jwt-secret-key-2026-secure-32b')
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 7
 

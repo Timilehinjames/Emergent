@@ -17,7 +17,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const [savings, setSavings] = useState<any>(null);
   const [recentReports, setRecentReports] = useState<any[]>([]);
-  const [gasStations, setGasStations] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -26,14 +25,12 @@ export default function HomeScreen() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const [savingsRes, reportsRes, gasRes] = await Promise.all([
+      const [savingsRes, reportsRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/savings-summary`, { headers }).then(r => r.ok ? r.json() : null),
         fetch(`${BACKEND_URL}/api/price-reports/recent?limit=5`, { headers }).then(r => r.ok ? r.json() : []),
-        fetch(`${BACKEND_URL}/api/gas-stations`, { headers }).then(r => r.ok ? r.json() : []),
       ]);
       if (savingsRes) setSavings(savingsRes);
       setRecentReports(reportsRes || []);
-      setGasStations(gasRes || []);
     } catch (e) {
       console.log('Fetch error:', e);
     } finally {
@@ -120,29 +117,6 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* Cheapest Gas */}
-        {gasStations.length > 0 && (
-          <>
-            <Text style={s.sectionTitle}>Cheapest Gas Nearby</Text>
-            <View style={s.gasCard}>
-              <View style={s.gasCardHeader}>
-                <Ionicons name="flame" size={24} color={colors.error} />
-                <Text style={s.gasCardTitle}>Gas Prices (Super)</Text>
-                <Text style={s.gasCardBadge}>MOCKED</Text>
-              </View>
-              {gasStations.slice(0, 3).map((gs, i) => (
-                <View key={i} style={s.gasRow}>
-                  <View style={s.gasInfo}>
-                    <Text style={s.gasName}>{gs.name}</Text>
-                    <Text style={s.gasRegion}>{gs.region}</Text>
-                  </View>
-                  <Text style={s.gasPrice}>${gs.price_per_litre}/L</Text>
-                </View>
-              ))}
-            </View>
-          </>
-        )}
-
         {/* Recent Community Updates */}
         <Text style={s.sectionTitle}>Recent Price Updates</Text>
         {recentReports.length === 0 ? (
@@ -211,24 +185,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.xs,
   },
   quickActionLabel: { fontSize: 11, fontWeight: '600', color: colors.textSecondary, textAlign: 'center', lineHeight: 14 },
-  gasCard: {
-    backgroundColor: colors.surface, borderRadius: Radius.xl,
-    padding: Spacing.m, marginBottom: Spacing.l, ...Shadows.card,
-  },
-  gasCardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.s, marginBottom: Spacing.m },
-  gasCardTitle: { fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 },
-  gasCardBadge: {
-    fontSize: 10, fontWeight: '700', color: colors.warning,
-    backgroundColor: colors.warning + '20', paddingHorizontal: 8, paddingVertical: 2, borderRadius: Radius.s,
-  },
-  gasRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: Spacing.s, borderTopWidth: 1, borderTopColor: colors.border,
-  },
-  gasInfo: {},
-  gasName: { fontSize: 14, fontWeight: '600', color: colors.text },
-  gasRegion: { fontSize: 12, color: colors.textSecondary },
-  gasPrice: { fontSize: 16, fontWeight: '800', color: colors.secondary },
   emptyCard: {
     backgroundColor: colors.surface, borderRadius: Radius.xl,
     padding: Spacing.xl, alignItems: 'center', ...Shadows.card,

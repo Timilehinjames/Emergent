@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
-import { Spacing, Radius, Shadows, STORE_NAMES, UNITS } from '../../src/constants/theme';
+import { Spacing, Radius, Shadows, UNITS, TT_REGIONS } from '../../src/constants/theme';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -23,9 +23,10 @@ interface CompareItem {
 export default function CompareScreen() {
   const { token } = useAuth();
   const { colors } = useTheme();
+  const [storeNames, setStoreNames] = useState<string[]>([]);
   const [items, setItems] = useState<CompareItem[]>([
-    { id: '1', product_name: '', store_name: STORE_NAMES[0], price: '', quantity: '1', unit: 'each' },
-    { id: '2', product_name: '', store_name: STORE_NAMES[3], price: '', quantity: '1', unit: 'each' },
+    { id: '1', product_name: '', store_name: '', price: '', quantity: '1', unit: 'each' },
+    { id: '2', product_name: '', store_name: '', price: '', quantity: '1', unit: 'each' },
   ]);
   const [results, setResults] = useState<any>(null);
   const [comparing, setComparing] = useState(false);
@@ -34,21 +35,64 @@ export default function CompareScreen() {
   const [timeOfDay, setTimeOfDay] = useState('midday');
   const [showStoreModal, setShowStoreModal] = useState<string | null>(null);
   const [showUnitModal, setShowUnitModal] = useState<string | null>(null);
-  const [products, setProducts] = useState<any[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [showAddStoreModal, setShowAddStoreModal] = useState(false);
+  const [newStoreName, setNewStoreName] = useState('');
+  const [newStoreRegion, setNewStoreRegion] = useState('East-West Corridor');
+  const [newStoreType, setNewStoreType] = useState('supermarket');
+  const [addingStore, setAddingStore] = useState(false);
 
   useEffect(() => {
-    fetchProducts();
+    fetchStores();
   }, []);
 
-  const fetchProducts = async (search = '') => {
+  const fetchStores = async () => {
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/products?search=${encodeURIComponent(search)}`);
+      const resp = await fetch(`${BACKEND_URL}/api/stores`);
       if (resp.ok) {
         const data = await resp.json();
-        setProducts(data);
+        const names = data.map((s: any) => s.name);
+        setStoreNames(names);
+        // Set default stores for items if not yet set
+        setItems(prev => prev.map((item, idx) => ({
+          ...item,
+          store_name: item.store_name || names[idx] || names[0] || ''
+        })));
       }
     } catch {}
+  };
+
+  const addStore = async () => {
+    if (!newStoreName.trim()) {
+      Alert.alert('Error', 'Please enter a store name');
+      return;
+    }
+    setAddingStore(true);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await fetch(`${BACKEND_URL}/api/stores`, {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          name: newStoreName.trim(),
+          type: newStoreType,
+          region: newStoreRegion,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        Alert.alert('Store Added!', `${data.store.name} added. You earned ${data.points_earned} points!`);
+        setNewStoreName('');
+        setShowAddStoreModal(false);
+        fetchStores();
+      } else {
+        const err = await resp.json().catch(() => ({}));
+        Alert.alert('Error', err.detail || 'Failed to add store');
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to add store');
+    } finally {
+      setAddingStore(false);
+    }
   };
 
   const updateItem = (id: string, field: string, value: string) => {
@@ -57,7 +101,7 @@ export default function CompareScreen() {
 
   const addItem = () => {
     setItems(prev => [...prev, {
-      id: Date.now().toString(), product_name: '', store_name: STORE_NAMES[0], price: '', quantity: '1', unit: 'each'
+      id: Date.now().toString(), product_name: '', store_name: storeNames[0] || '', price: '', quantity: '1', unit: 'each'
     }]);
   };
 
@@ -100,8 +144,8 @@ export default function CompareScreen() {
   };
 
   const planTrip = async () => {
-    const storeNames = [...new Set(items.map(i => i.store_name))];
-    if (storeNames.length < 2) {
+    const uniqueStores = [...new Set(items.map(i => i.store_name))];
+    if (uniqueStores.length < 2) {
       Alert.alert('Tip', 'Select different stores to plan a trip between them');
       return;
     }
@@ -110,7 +154,7 @@ export default function CompareScreen() {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const resp = await fetch(`${BACKEND_URL}/api/trip/plan`, {
         method: 'POST', headers,
-        body: JSON.stringify({ stores: storeNames, time_of_day: timeOfDay }),
+        body: JSON.stringify({ stores: uniqueStores, time_of_day: timeOfDay }),
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -122,6 +166,7 @@ export default function CompareScreen() {
   };
 
   const s = createStyles(colors);
+  const STORE_TYPES = ['supermarket', 'wholesale', 'pharmacy', 'convenience', 'market'];
 
   return (
     <SafeAreaView style={s.container} testID="compare-screen">
@@ -169,15 +214,17 @@ export default function CompareScreen() {
                 value={item.product_name}
                 onChangeText={(v) => updateItem(item.id, 'product_name', v)}
               />
-              <TouchableOpacity
-                testID={`store-select-${idx}`}
-                style={s.selectBtn}
-                onPress={() => setShowStoreModal(item.id)}
-              >
-                <Ionicons name="storefront-outline" size={18} color={colors.textSecondary} />
-                <Text style={s.selectText} numberOfLines={1}>{item.store_name}</Text>
-                <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
-              </TouchableOpacity>
+              <View style={s.storeSelectRow}>
+                <TouchableOpacity
+                  testID={`store-select-${idx}`}
+                  style={[s.selectBtn, { flex: 1 }]}
+                  onPress={() => setShowStoreModal(item.id)}
+                >
+                  <Ionicons name="storefront-outline" size={18} color={colors.textSecondary} />
+                  <Text style={s.selectText} numberOfLines={1}>{item.store_name || 'Select Store'}</Text>
+                  <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
               <View style={s.priceRow}>
                 <View style={[s.priceInput, { flex: 1.5 }]}>
                   <Text style={s.priceLabel}>Price (TTD)</Text>
@@ -330,7 +377,7 @@ export default function CompareScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Store Modal */}
+      {/* Store Selection Modal */}
       <Modal visible={!!showStoreModal} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={s.modalContent}>
@@ -341,7 +388,7 @@ export default function CompareScreen() {
               </TouchableOpacity>
             </View>
             <FlatList
-              data={STORE_NAMES}
+              data={storeNames}
               keyExtractor={(item) => item}
               renderItem={({ item }) => (
                 <TouchableOpacity
@@ -352,9 +399,20 @@ export default function CompareScreen() {
                     setShowStoreModal(null);
                   }}
                 >
+                  <Ionicons name="storefront-outline" size={18} color={colors.textSecondary} />
                   <Text style={s.modalItemText}>{item}</Text>
                 </TouchableOpacity>
               )}
+              ListFooterComponent={
+                <TouchableOpacity
+                  testID="add-new-store-btn"
+                  style={s.addStoreBtn}
+                  onPress={() => { setShowStoreModal(null); setShowAddStoreModal(true); }}
+                >
+                  <Ionicons name="add-circle" size={22} color={colors.secondary} />
+                  <Text style={[s.modalItemText, { color: colors.secondary, fontWeight: '700' }]}>Add New Store</Text>
+                </TouchableOpacity>
+              }
             />
           </View>
         </View>
@@ -389,6 +447,71 @@ export default function CompareScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Add Store Modal */}
+      <Modal visible={showAddStoreModal} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>Add New Store</Text>
+              <TouchableOpacity testID="close-add-store-modal" onPress={() => setShowAddStoreModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <View style={s.addStoreForm}>
+                <Text style={s.addStoreLabel}>Store Name</Text>
+                <TextInput
+                  testID="new-store-name-input"
+                  style={s.textInput}
+                  placeholder="e.g. Randy's Supermarket - San Juan"
+                  placeholderTextColor={colors.textSecondary}
+                  value={newStoreName}
+                  onChangeText={setNewStoreName}
+                />
+                <Text style={s.addStoreLabel}>Store Type</Text>
+                <View style={s.typeRow}>
+                  {STORE_TYPES.map(t => (
+                    <TouchableOpacity
+                      key={t}
+                      testID={`store-type-${t}`}
+                      style={[s.typeChip, newStoreType === t && { backgroundColor: colors.primary }]}
+                      onPress={() => setNewStoreType(t)}
+                    >
+                      <Text style={[s.typeChipText, newStoreType === t && { color: colors.primaryForeground }]}>
+                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={s.addStoreLabel}>Zone</Text>
+                <View style={s.typeRow}>
+                  {TT_REGIONS.map(r => (
+                    <TouchableOpacity
+                      key={r}
+                      testID={`new-store-region-${r}`}
+                      style={[s.typeChip, newStoreRegion === r && { backgroundColor: colors.primary }]}
+                      onPress={() => setNewStoreRegion(r)}
+                    >
+                      <Text style={[s.typeChipText, newStoreRegion === r && { color: colors.primaryForeground }]}>{r}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity testID="submit-new-store-btn" style={s.submitStoreBtn} onPress={addStore} disabled={addingStore}>
+                  {addingStore ? (
+                    <ActivityIndicator color={colors.primaryForeground} />
+                  ) : (
+                    <>
+                      <Ionicons name="add-circle" size={20} color={colors.primaryForeground} />
+                      <Text style={s.submitStoreBtnText}>Add Store (+5 pts)</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -416,9 +539,10 @@ const createStyles = (colors: any) => StyleSheet.create({
     backgroundColor: colors.inputBg, borderRadius: Radius.m, paddingHorizontal: Spacing.m,
     height: 44, fontSize: 15, color: colors.text, marginBottom: Spacing.s,
   },
+  storeSelectRow: { flexDirection: 'row', gap: Spacing.s, marginBottom: Spacing.s },
   selectBtn: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: colors.inputBg,
-    borderRadius: Radius.m, paddingHorizontal: Spacing.m, height: 44, gap: Spacing.s, marginBottom: Spacing.s,
+    borderRadius: Radius.m, paddingHorizontal: Spacing.m, height: 44, gap: Spacing.s,
   },
   selectText: { flex: 1, fontSize: 14, color: colors.text },
   priceRow: { flexDirection: 'row', gap: Spacing.s },
@@ -497,10 +621,30 @@ const createStyles = (colors: any) => StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
-    padding: Spacing.l, maxHeight: '60%',
+    padding: Spacing.l, maxHeight: '70%',
   },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.m },
   modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
-  modalItem: { paddingVertical: Spacing.m, borderBottomWidth: 1, borderBottomColor: colors.border },
+  modalItem: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
+    paddingVertical: Spacing.m, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
   modalItemText: { fontSize: 16, color: colors.text },
+  addStoreBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
+    paddingVertical: Spacing.l, borderTopWidth: 2, borderTopColor: colors.border, marginTop: Spacing.s,
+  },
+  addStoreForm: { paddingBottom: Spacing.xl },
+  addStoreLabel: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: Spacing.xs, marginTop: Spacing.m },
+  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.s, marginBottom: Spacing.s },
+  typeChip: {
+    paddingHorizontal: Spacing.m, paddingVertical: Spacing.s,
+    borderRadius: Radius.full, backgroundColor: colors.inputBg,
+  },
+  typeChipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  submitStoreBtn: {
+    flexDirection: 'row', backgroundColor: colors.secondary, borderRadius: Radius.full,
+    height: 48, justifyContent: 'center', alignItems: 'center', gap: Spacing.s, marginTop: Spacing.l,
+  },
+  submitStoreBtnText: { fontSize: 16, fontWeight: '700', color: colors.secondaryForeground },
 });

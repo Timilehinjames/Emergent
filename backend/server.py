@@ -39,7 +39,7 @@ class UserRegister(BaseModel):
     email: str
     password: str
     name: str
-    region: str = "North"
+    region: str = "East-West Corridor"
 
 class UserLogin(BaseModel):
     email: str
@@ -206,7 +206,7 @@ async def exchange_google_session(request: Request):
             "password_hash": "",
             "name": name,
             "picture": picture,
-            "region": "North",
+            "region": "East-West Corridor",
             "is_pricesmart_member": False,
             "points": 0,
             "created_at": datetime.now(timezone.utc).isoformat()
@@ -258,6 +258,39 @@ async def get_product_prices(product_id: str):
 async def get_stores():
     stores = await db.stores.find({}, {"_id": 0}).to_list(100)
     return stores
+
+@api_router.post("/stores")
+async def create_store(request: Request):
+    user = await get_current_user(request)
+    body = await request.json()
+    name = body.get("name", "").strip()
+    store_type = body.get("type", "supermarket")
+    region = body.get("region", "East-West Corridor")
+    lat = float(body.get("lat", 0))
+    lng = float(body.get("lng", 0))
+    if not name:
+        raise HTTPException(status_code=400, detail="Store name is required")
+    existing = await db.stores.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Store already exists")
+    store_id = f"store_{uuid.uuid4().hex[:8]}"
+    store_doc = {
+        "store_id": store_id,
+        "name": name,
+        "type": store_type,
+        "region": region,
+        "lat": lat,
+        "lng": lng,
+        "added_by": user["user_id"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.stores.insert_one(store_doc)
+    # Also add to trip planner locations
+    TT_STORES_LOCATIONS[name] = {"lat": lat, "lng": lng, "region": region}
+    # Award points for adding a store
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 5}})
+    store_doc.pop("_id", None)
+    return {"store": store_doc, "points_earned": 5}
 
 @api_router.get("/categories")
 async def get_categories():
@@ -395,17 +428,17 @@ async def compare_unit_prices(request: Request):
 # ============ TRIP PLANNER (MOCKED) ============
 
 TT_STORES_LOCATIONS = {
-    "Massy Stores - Trincity": {"lat": 10.6364, "lng": -61.3487, "region": "North"},
+    "Massy Stores - Trincity": {"lat": 10.6364, "lng": -61.3487, "region": "East-West Corridor"},
     "Massy Stores - Gulf City": {"lat": 10.2833, "lng": -61.4667, "region": "South"},
     "Massy Stores - Price Plaza": {"lat": 10.5167, "lng": -61.4000, "region": "Central"},
     "PriceSmart - Chaguanas": {"lat": 10.5167, "lng": -61.4119, "region": "Central"},
-    "PriceSmart - Trincity": {"lat": 10.6364, "lng": -61.3487, "region": "North"},
+    "PriceSmart - Trincity": {"lat": 10.6364, "lng": -61.3487, "region": "East-West Corridor"},
     "Pennywise - San Fernando": {"lat": 10.2833, "lng": -61.4667, "region": "South"},
     "Pennywise - Chaguanas": {"lat": 10.5167, "lng": -61.4119, "region": "Central"},
-    "Pennywise - Port of Spain": {"lat": 10.6596, "lng": -61.5086, "region": "North"},
-    "Hi-Lo - Maraval": {"lat": 10.6833, "lng": -61.5333, "region": "North"},
-    "Hi-Lo - Valsayn": {"lat": 10.6417, "lng": -61.4167, "region": "North"},
-    "JTA Supermarket - Arima": {"lat": 10.6333, "lng": -61.2833, "region": "North"},
+    "Pennywise - Port of Spain": {"lat": 10.6596, "lng": -61.5086, "region": "West"},
+    "Hi-Lo - Maraval": {"lat": 10.6833, "lng": -61.5333, "region": "West"},
+    "Hi-Lo - Valsayn": {"lat": 10.6417, "lng": -61.4167, "region": "East-West Corridor"},
+    "JTA Supermarket - Arima": {"lat": 10.6333, "lng": -61.2833, "region": "North East"},
 }
 
 MOCK_TRAFFIC_PATTERNS = {
@@ -468,11 +501,6 @@ async def plan_trip(request: Request):
         "suggestion": suggestion,
         "time_of_day": time_of_day
     }
-
-@api_router.get("/gas-stations")
-async def get_gas_stations():
-    stations = await db.gas_stations.find({}, {"_id": 0}).to_list(50)
-    return stations
 
 # ============ SCAN / OCR ============
 
@@ -647,16 +675,16 @@ async def seed_database():
     store_count = await db.stores.count_documents({})
     if store_count == 0:
         stores = [
-            {"store_id": "store_massy_trincity", "name": "Massy Stores - Trincity", "type": "supermarket", "region": "North", "lat": 10.6364, "lng": -61.3487},
+            {"store_id": "store_massy_trincity", "name": "Massy Stores - Trincity", "type": "supermarket", "region": "East-West Corridor", "lat": 10.6364, "lng": -61.3487},
             {"store_id": "store_massy_gulf", "name": "Massy Stores - Gulf City", "type": "supermarket", "region": "South", "lat": 10.2833, "lng": -61.4667},
             {"store_id": "store_massy_price", "name": "Massy Stores - Price Plaza", "type": "supermarket", "region": "Central", "lat": 10.5167, "lng": -61.4000},
             {"store_id": "store_ps_chag", "name": "PriceSmart - Chaguanas", "type": "wholesale", "region": "Central", "lat": 10.5167, "lng": -61.4119},
-            {"store_id": "store_ps_trinc", "name": "PriceSmart - Trincity", "type": "wholesale", "region": "North", "lat": 10.6364, "lng": -61.3487},
+            {"store_id": "store_ps_trinc", "name": "PriceSmart - Trincity", "type": "wholesale", "region": "East-West Corridor", "lat": 10.6364, "lng": -61.3487},
             {"store_id": "store_pw_sf", "name": "Pennywise - San Fernando", "type": "pharmacy", "region": "South", "lat": 10.2833, "lng": -61.4667},
             {"store_id": "store_pw_chag", "name": "Pennywise - Chaguanas", "type": "pharmacy", "region": "Central", "lat": 10.5167, "lng": -61.4119},
-            {"store_id": "store_pw_pos", "name": "Pennywise - Port of Spain", "type": "pharmacy", "region": "North", "lat": 10.6596, "lng": -61.5086},
-            {"store_id": "store_hilo_mar", "name": "Hi-Lo - Maraval", "type": "supermarket", "region": "North", "lat": 10.6833, "lng": -61.5333},
-            {"store_id": "store_jta_arima", "name": "JTA Supermarket - Arima", "type": "supermarket", "region": "North", "lat": 10.6333, "lng": -61.2833},
+            {"store_id": "store_pw_pos", "name": "Pennywise - Port of Spain", "type": "pharmacy", "region": "West", "lat": 10.6596, "lng": -61.5086},
+            {"store_id": "store_hilo_mar", "name": "Hi-Lo - Maraval", "type": "supermarket", "region": "West", "lat": 10.6833, "lng": -61.5333},
+            {"store_id": "store_jta_arima", "name": "JTA Supermarket - Arima", "type": "supermarket", "region": "North East", "lat": 10.6333, "lng": -61.2833},
         ]
         await db.stores.insert_many(stores)
         logger.info("Seeded stores")
@@ -697,18 +725,6 @@ async def seed_database():
         ]
         await db.price_reports.insert_many(sample_reports)
         logger.info("Seeded price reports")
-    # Seed gas stations (mocked)
-    gas_count = await db.gas_stations.count_documents({})
-    if gas_count == 0:
-        gas_stations = [
-            {"station_id": "gas_1", "name": "NP - Trincity", "brand": "NP", "lat": 10.6350, "lng": -61.3500, "region": "North", "price_per_litre": 5.97, "fuel_type": "Super"},
-            {"station_id": "gas_2", "name": "NP - Chaguanas", "brand": "NP", "lat": 10.5200, "lng": -61.4100, "region": "Central", "price_per_litre": 5.97, "fuel_type": "Super"},
-            {"station_id": "gas_3", "name": "Unipet - Curepe", "brand": "Unipet", "lat": 10.6417, "lng": -61.4000, "region": "North", "price_per_litre": 5.97, "fuel_type": "Super"},
-            {"station_id": "gas_4", "name": "NP - San Fernando", "brand": "NP", "lat": 10.2800, "lng": -61.4600, "region": "South", "price_per_litre": 5.97, "fuel_type": "Super"},
-            {"station_id": "gas_5", "name": "Unipet - Scarborough", "brand": "Unipet", "lat": 11.1833, "lng": -60.7333, "region": "Tobago", "price_per_litre": 5.97, "fuel_type": "Super"},
-        ]
-        await db.gas_stations.insert_many(gas_stations)
-        logger.info("Seeded gas stations")
     # Create indexes
     await db.users.create_index("email", unique=True)
     await db.users.create_index("user_id", unique=True)

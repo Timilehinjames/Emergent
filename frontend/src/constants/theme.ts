@@ -73,7 +73,7 @@ export const Shadows = {
   },
 };
 
-export const TT_REGIONS = ['North', 'South', 'Central', 'Tobago'];
+export const TT_REGIONS = ['East-West Corridor', 'North East', 'West', 'Central', 'South', 'Deep South'];
 
 export const STORE_NAMES = [
   'Massy Stores - Trincity',

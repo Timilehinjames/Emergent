@@ -1,0 +1,166 @@
+{
+  "brand_identity": {
+    "name": "TriniSaver",
+    "persona": "The Tropical Pragmatist",
+    "tone": "Vibrant, Community-Focused, Trustworthy, Efficient",
+    "core_values": ["Localized Savings", "Community Power", "Tropical Warmth", "Data Clarity"],
+    "visual_theme": "Modern Caribbean Utility"
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope",
+      "body": "System",
+      "mono": "Space Mono"
+    },
+    "scale": {
+      "h1": { "size": 32, "weight": "700", "lineHeight": 40, "letterSpacing": -0.5 },
+      "h2": { "size": 28, "weight": "700", "lineHeight": 36, "letterSpacing": -0.5 },
+      "h3": { "size": 24, "weight": "600", "lineHeight": 32, "letterSpacing": 0 },
+      "body_lg": { "size": 18, "weight": "400", "lineHeight": 28 },
+      "body": { "size": 16, "weight": "400", "lineHeight": 24 },
+      "caption": { "size": 14, "weight": "500", "lineHeight": 20, "color": "text-secondary" },
+      "tiny": { "size": 12, "weight": "600", "textTransform": "uppercase", "letterSpacing": 1 }
+    }
+  },
+  "colors": {
+    "light": {
+      "primary": "#0277BD", 
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#2E7D32",
+      "secondary_foreground": "#FFFFFF",
+      "accent": "#FFB300",
+      "accent_foreground": "#1A1A1A",
+      "background": "#F5F7FA",
+      "surface": "#FFFFFF",
+      "text": "#1A1A1A",
+      "text_secondary": "#64748B",
+      "border": "#E2E8F0",
+      "success": "#2E7D32",
+      "error": "#EF4444",
+      "warning": "#F59E0B"
+    },
+    "dark": {
+      "primary": "#4FC3F7",
+      "primary_foreground": "#0A1929",
+      "secondary": "#66BB6A",
+      "secondary_foreground": "#0A1929",
+      "accent": "#FFD54F",
+      "accent_foreground": "#0A1929",
+      "background": "#0F172A",
+      "surface": "#1E293B",
+      "text": "#F8FAFC",
+      "text_secondary": "#94A3B8",
+      "border": "#334155",
+      "success": "#4ADE80",
+      "error": "#F87171",
+      "warning": "#FBBF24"
+    },
+    "palette_notes": "Primary Blue is 'Caribbean Deep Ocean'. Secondary Green is 'Lush Palm'. Accent is 'Golden Sun'. Backgrounds are 'White Sand' (Light) and 'Deep Reef' (Dark)."
+  },
+  "layout_system": {
+    "spacing": {
+      "xs": 4,
+      "s": 8,
+      "m": 16,
+      "l": 24,
+      "xl": 32,
+      "2xl": 48
+    },
+    "radius": {
+      "s": 8,
+      "m": 12,
+      "l": 16,
+      "xl": 24,
+      "full": 9999
+    },
+    "shadows": {
+      "card": {
+        "shadowColor": "#000",
+        "shadowOffset": { "width": 0, "height": 4 },
+        "shadowOpacity": 0.1,
+        "shadowRadius": 12,
+        "elevation": 4
+      },
+      "floating": {
+        "shadowColor": "#0277BD",
+        "shadowOffset": { "width": 0, "height": 8 },
+        "shadowOpacity": 0.2,
+        "shadowRadius": 20,
+        "elevation": 8
+      }
+    }
+  },
+  "components": {
+    "Card": {
+      "style": "Island Card",
+      "description": "Clean white/surface cards with generous padding (16-24px) and soft shadows. Use for saving summaries, store comparisons.",
+      "props": {
+        "padding": 16,
+        "borderRadius": 20,
+        "backgroundColor": "surface"
+      }
+    },
+    "Button": {
+      "style": "Tropical Pill",
+      "description": "Full rounded buttons (height 48-56px). Primary is solid Blue/Green gradient logic (optional) or flat Blue. Text is bold Manrope.",
+      "props": {
+        "height": 52,
+        "borderRadius": 999,
+        "paddingHorizontal": 24
+      }
+    },
+    "Input": {
+      "style": "Soft Field",
+      "description": "Light grey background (#F1F5F9) instead of borders. Focus state adds a 2px Primary border.",
+      "props": {
+        "height": 50,
+        "borderRadius": 12,
+        "backgroundColor": "#F1F5F9 (Light) / #334155 (Dark)"
+      }
+    },
+    "TabBar": {
+      "style": "Floating Dock",
+      "description": "Glassmorphic or solid surface bar floating slightly above bottom safe area, or standard clean bar with active tint color Primary."
+    }
+  },
+  "image_assets": {
+    "auth_hero": {
+      "url": "https://images.unsplash.com/photo-1753354868473-94c8ac971269?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODd8MHwxfHNlYXJjaHwyfHxoYXBweSUyMGZhbWlseSUyMGdyb2NlcnklMjBzaG9wcGluZ3xlbnwwfHx8fDE3NzM2OTU5OTl8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Father and son shopping - Community Trust",
+      "usage": "Login/Register Screen Background or Top Header"
+    },
+    "community_header": {
+      "url": "https://images.unsplash.com/photo-1574661062600-4a3cd81d2375?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwxfHx0cm9waWNhbCUyMGZydWl0JTIwbWFya2V0fGVufDB8fHx8MTc3MzY5NTk5OXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Vibrant tropical fruit pile",
+      "usage": "Community/Leaderboard Header Background"
+    },
+    "price_check_bg": {
+      "url": "https://images.unsplash.com/photo-1760463921658-0fa0ce72c91c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBzdXBlcm1hcmtldCUyMGFpc2xlfGVufDB8fHx8MTc3MzY5NjAwMHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Modern supermarket aisle",
+      "usage": "Price Comparison Screen subtle overlay or empty state"
+    }
+  },
+  "tech_stack_rules": {
+    "framework": "React Native (Expo SDK 54)",
+    "styling": "StyleSheet.create() only. NO CSS/Tailwind classes directly.",
+    "icons": "Use @expo/vector-icons (Ionicons preferred) or Lucide React Native if available.",
+    "navigation": "Expo Router (File-based routing)",
+    "safe_area": "Always wrap main views in SafeAreaView or use useSafeAreaInsets.",
+    "data_testid": "MANDATORY: Add testID prop to all Touchable/Pressable elements for testing."
+  },
+  "universal_guidelines": {
+    "design_principle": "E1 Persona - Fusion of Utility & Warmth.",
+    "rule_1": "Do NOT use default system blue. Use the Brand Primary Blue.",
+    "rule_2": "Touch targets must be 44px minimum.",
+    "rule_3": "Avoid pure black (#000) backgrounds; use #0F172A for dark mode.",
+    "rule_4": "Use 'Bento' grids for dashboard summaries (Savings, Points, Gas).",
+    "rule_5": "Images must always have a dark overlay (20-40%) if text is placed over them."
+  },
+  "instructions_to_main_agent": {
+    "step_1": "Set up the Theme Context (Light/Dark) using the color palette.",
+    "step_2": "Create reusable atoms: Typography (ThemedText), Button (ThemedButton), Card (ThemedCard).",
+    "step_3": "Implement Auth Screens with the 'auth_hero' image.",
+    "step_4": "Build the Tab Navigator (Home, Compare, Scan, Trip, Profile).",
+    "step_5": "Mock the Map View and Data for Leaderboards using the color codes provided."
+  }
+}

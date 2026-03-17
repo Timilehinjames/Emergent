@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Modal, FlatList
+  KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Modal, FlatList, Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { Spacing, Radius, Shadows, UNITS, TT_REGIONS } from '../../src/constants/theme';
@@ -40,6 +41,14 @@ export default function CompareScreen() {
   const [newStoreRegion, setNewStoreRegion] = useState('East-West Corridor');
   const [newStoreType, setNewStoreType] = useState('supermarket');
   const [addingStore, setAddingStore] = useState(false);
+  
+  // Scan to Compare states
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scannedImage, setScannedImage] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<any>(null);
+  const [communityPrices, setCommunityPrices] = useState<any[]>([]);
+  const [loadingPrices, setLoadingPrices] = useState(false);
 
   useEffect(() => {
     fetchStores();
@@ -93,6 +102,103 @@ export default function CompareScreen() {
     } finally {
       setAddingStore(false);
     }
+  };
+
+  // Scan to Compare functions
+  const pickImage = async (useCamera: boolean) => {
+    try {
+      const permission = useCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission needed', `Please allow ${useCamera ? 'camera' : 'gallery'} access`);
+        return;
+      }
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 })
+        : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.7 });
+
+      if (!result.canceled && result.assets[0].base64) {
+        setScannedImage(result.assets[0].base64);
+        setScanResult(null);
+        setCommunityPrices([]);
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  };
+
+  const scanForPrice = async () => {
+    if (!scannedImage) return;
+    setScanning(true);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      const resp = await fetch(`${BACKEND_URL}/api/scan/shelf-tag`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ image_base64: scannedImage }),
+      });
+      
+      if (resp.ok) {
+        const data = await resp.json();
+        setScanResult(data);
+        // Search for community prices of this product
+        if (data.product_name) {
+          fetchCommunityPrices(data.product_name);
+        }
+      } else {
+        Alert.alert('Scan Failed', 'Could not read the price tag. Try again.');
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to scan');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const fetchCommunityPrices = async (productName: string) => {
+    setLoadingPrices(true);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      const resp = await fetch(`${BACKEND_URL}/api/price-reports/search?product=${encodeURIComponent(productName)}&limit=10`, {
+        headers
+      });
+      
+      if (resp.ok) {
+        const data = await resp.json();
+        setCommunityPrices(data);
+      }
+    } catch {} finally {
+      setLoadingPrices(false);
+    }
+  };
+
+  const addScannedToCompare = () => {
+    if (!scanResult) return;
+    const newItem: CompareItem = {
+      id: Date.now().toString(),
+      product_name: scanResult.product_name || 'Scanned Product',
+      store_name: storeNames[0] || '',
+      price: scanResult.price?.toString() || '',
+      quantity: scanResult.quantity?.toString() || '1',
+      unit: scanResult.unit || 'each',
+    };
+    setItems(prev => [...prev, newItem]);
+    setShowScanModal(false);
+    resetScan();
+    Alert.alert('Added!', 'Product added to comparison list');
+  };
+
+  const resetScan = () => {
+    setScannedImage(null);
+    setScanResult(null);
+    setCommunityPrices([]);
   };
 
   const updateItem = (id: string, field: string, value: string) => {
@@ -174,6 +280,16 @@ export default function CompareScreen() {
         <ScrollView contentContainerStyle={s.scrollContent} keyboardShouldPersistTaps="handled">
           <Text style={s.title}>Price Compare</Text>
           <Text style={s.subtitle}>Compare unit prices across T&T stores</Text>
+
+          {/* Scan to Compare Button */}
+          <TouchableOpacity
+            testID="scan-compare-btn"
+            style={s.scanCompareBtn}
+            onPress={() => setShowScanModal(true)}
+          >
+            <Ionicons name="camera" size={22} color={colors.primaryForeground} />
+            <Text style={s.scanCompareBtnText}>Scan Price Tag to Compare</Text>
+          </TouchableOpacity>
 
           {/* Toggle: Compare vs Trip */}
           <View style={s.toggleRow}>
@@ -512,6 +628,149 @@ export default function CompareScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Scan to Compare Modal */}
+      <Modal visible={showScanModal} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={s.scanModalContent}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>Scan to Compare</Text>
+              <TouchableOpacity onPress={() => { setShowScanModal(false); resetScan(); }}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {!scannedImage ? (
+                <>
+                  <Text style={s.scanInstructions}>
+                    Take a photo of a price tag or product label to scan and compare prices
+                  </Text>
+                  <View style={s.scanButtons}>
+                    <TouchableOpacity
+                      testID="scan-camera-btn"
+                      style={s.scanCameraBtn}
+                      onPress={() => pickImage(true)}
+                    >
+                      <Ionicons name="camera" size={32} color={colors.primaryForeground} />
+                      <Text style={s.scanCameraBtnText}>Take Photo</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      testID="scan-gallery-btn"
+                      style={s.scanGalleryBtn}
+                      onPress={() => pickImage(false)}
+                    >
+                      <Ionicons name="images" size={28} color={colors.primary} />
+                      <Text style={s.scanGalleryBtnText}>Gallery</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Image
+                    source={{ uri: `data:image/jpeg;base64,${scannedImage}` }}
+                    style={s.scannedPreview}
+                    resizeMode="contain"
+                  />
+                  
+                  {!scanResult && (
+                    <TouchableOpacity
+                      testID="scan-price-btn"
+                      style={s.readPriceBtn}
+                      onPress={scanForPrice}
+                      disabled={scanning}
+                    >
+                      {scanning ? (
+                        <ActivityIndicator color={colors.primaryForeground} />
+                      ) : (
+                        <>
+                          <Ionicons name="scan" size={20} color={colors.primaryForeground} />
+                          <Text style={s.readPriceBtnText}>Read Price</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+
+                  {scanResult && (
+                    <View style={s.scanResultCard}>
+                      <Text style={s.scanResultTitle}>Scanned Product</Text>
+                      <View style={s.scanResultRow}>
+                        <Text style={s.scanResultLabel}>Product:</Text>
+                        <Text style={s.scanResultValue}>{scanResult.product_name || 'Unknown'}</Text>
+                      </View>
+                      <View style={s.scanResultRow}>
+                        <Text style={s.scanResultLabel}>Price:</Text>
+                        <Text style={[s.scanResultValue, { color: colors.primary, fontWeight: '800' }]}>
+                          ${scanResult.price?.toFixed(2) || '0.00'} TTD
+                        </Text>
+                      </View>
+                      {scanResult.quantity && scanResult.unit && (
+                        <View style={s.scanResultRow}>
+                          <Text style={s.scanResultLabel}>Size:</Text>
+                          <Text style={s.scanResultValue}>{scanResult.quantity} {scanResult.unit}</Text>
+                        </View>
+                      )}
+                      
+                      <TouchableOpacity
+                        testID="add-to-compare-btn"
+                        style={s.addToCompareBtn}
+                        onPress={addScannedToCompare}
+                      >
+                        <Ionicons name="add-circle" size={20} color={colors.primaryForeground} />
+                        <Text style={s.addToCompareBtnText}>Add to Compare List</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* Community Prices */}
+                  {scanResult && (
+                    <View style={s.communitySection}>
+                      <Text style={s.communityTitle}>Community Prices</Text>
+                      {loadingPrices ? (
+                        <ActivityIndicator color={colors.primary} style={{ marginVertical: Spacing.m }} />
+                      ) : communityPrices.length > 0 ? (
+                        communityPrices.map((report, i) => (
+                          <View key={i} style={s.communityPriceCard}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.communityStoreName}>{report.store_name}</Text>
+                              <Text style={s.communityProductName}>{report.product_name}</Text>
+                            </View>
+                            <View style={s.communityPriceCol}>
+                              <Text style={[s.communityPrice, {
+                                color: report.price < scanResult.price ? colors.success : 
+                                       report.price > scanResult.price ? colors.error : colors.text
+                              }]}>
+                                ${report.price?.toFixed(2)}
+                              </Text>
+                              {report.price < scanResult.price && (
+                                <Text style={s.savingsTag}>
+                                  Save ${(scanResult.price - report.price).toFixed(2)}
+                                </Text>
+                              )}
+                            </View>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={s.noCommunityPrices}>
+                          No community reports found for this product yet.
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={s.retakeBtn}
+                    onPress={resetScan}
+                  >
+                    <Ionicons name="refresh" size={18} color={colors.primary} />
+                    <Text style={s.retakeBtnText}>Take New Photo</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -647,4 +906,75 @@ const createStyles = (colors: any) => StyleSheet.create({
     height: 48, justifyContent: 'center', alignItems: 'center', gap: Spacing.s, marginTop: Spacing.l,
   },
   submitStoreBtnText: { fontSize: 16, fontWeight: '700', color: colors.secondaryForeground },
+  // Scan to Compare styles
+  scanCompareBtn: {
+    flexDirection: 'row', backgroundColor: colors.accent, borderRadius: Radius.l,
+    paddingVertical: Spacing.m, paddingHorizontal: Spacing.l, alignItems: 'center',
+    justifyContent: 'center', gap: Spacing.s, marginBottom: Spacing.l,
+  },
+  scanCompareBtnText: { fontSize: 15, fontWeight: '700', color: colors.primaryForeground },
+  scanModalContent: {
+    backgroundColor: colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
+    padding: Spacing.l, maxHeight: '90%',
+  },
+  scanInstructions: {
+    fontSize: 14, color: colors.textSecondary, textAlign: 'center',
+    marginBottom: Spacing.l, lineHeight: 22,
+  },
+  scanButtons: { flexDirection: 'row', gap: Spacing.m, marginBottom: Spacing.l },
+  scanCameraBtn: {
+    flex: 1, backgroundColor: colors.primary, borderRadius: Radius.l,
+    paddingVertical: Spacing.xl, alignItems: 'center', gap: Spacing.s,
+  },
+  scanCameraBtnText: { fontSize: 16, fontWeight: '700', color: colors.primaryForeground },
+  scanGalleryBtn: {
+    flex: 0.5, backgroundColor: colors.primary + '15', borderRadius: Radius.l,
+    paddingVertical: Spacing.xl, alignItems: 'center', gap: Spacing.s,
+    borderWidth: 2, borderColor: colors.primary,
+  },
+  scanGalleryBtnText: { fontSize: 14, fontWeight: '600', color: colors.primary },
+  scannedPreview: {
+    width: '100%', height: 200, borderRadius: Radius.l,
+    backgroundColor: colors.inputBg, marginBottom: Spacing.m,
+  },
+  readPriceBtn: {
+    flexDirection: 'row', backgroundColor: colors.primary, borderRadius: Radius.full,
+    height: 50, justifyContent: 'center', alignItems: 'center', gap: Spacing.s, marginBottom: Spacing.m,
+  },
+  readPriceBtnText: { fontSize: 16, fontWeight: '700', color: colors.primaryForeground },
+  scanResultCard: {
+    backgroundColor: colors.background, borderRadius: Radius.l, padding: Spacing.m,
+    marginBottom: Spacing.m, borderWidth: 1, borderColor: colors.border,
+  },
+  scanResultTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: Spacing.s },
+  scanResultRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  scanResultLabel: { fontSize: 14, color: colors.textSecondary },
+  scanResultValue: { fontSize: 14, fontWeight: '600', color: colors.text },
+  addToCompareBtn: {
+    flexDirection: 'row', backgroundColor: colors.success, borderRadius: Radius.full,
+    height: 44, justifyContent: 'center', alignItems: 'center', gap: Spacing.s, marginTop: Spacing.m,
+  },
+  addToCompareBtnText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+  communitySection: { marginTop: Spacing.m },
+  communityTitle: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: Spacing.s },
+  communityPriceCard: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background,
+    borderRadius: Radius.m, padding: Spacing.m, marginBottom: Spacing.s,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  communityStoreName: { fontSize: 14, fontWeight: '600', color: colors.text },
+  communityProductName: { fontSize: 12, color: colors.textSecondary },
+  communityPriceCol: { alignItems: 'flex-end' },
+  communityPrice: { fontSize: 18, fontWeight: '800' },
+  savingsTag: {
+    fontSize: 11, fontWeight: '700', color: colors.success,
+    backgroundColor: colors.success + '15', paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 4, marginTop: 2,
+  },
+  noCommunityPrices: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', paddingVertical: Spacing.m },
+  retakeBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: Spacing.xs, paddingVertical: Spacing.m,
+  },
+  retakeBtnText: { fontSize: 14, fontWeight: '600', color: colors.primary },
 });

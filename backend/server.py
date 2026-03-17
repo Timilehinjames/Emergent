@@ -387,6 +387,21 @@ async def get_recent_reports(limit: int = 20):
     ).sort("created_at", -1).to_list(limit)
     return reports
 
+@api_router.get("/price-reports/search")
+async def search_price_reports(product: str = "", store: str = "", limit: int = 20):
+    """Search price reports by product name or store"""
+    query = {}
+    if product:
+        query["product_name"] = {"$regex": product, "$options": "i"}
+    if store:
+        query["store_name"] = {"$regex": store, "$options": "i"}
+    
+    reports = await db.price_reports.find(
+        query,
+        {"_id": 0, "photo_base64": 0}
+    ).sort("created_at", -1).to_list(limit)
+    return reports
+
 # ============ FLAG AS OUTDATED ============
 
 FLAG_THRESHOLD = 3  # Number of flags before auto-marking as outdated

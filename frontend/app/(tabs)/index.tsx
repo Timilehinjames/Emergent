@@ -18,6 +18,7 @@ export default function HomeScreen() {
   const [savings, setSavings] = useState<any>(null);
   const [recentReports, setRecentReports] = useState<any[]>([]);
   const [myLists, setMyLists] = useState<any[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -25,14 +26,16 @@ export default function HomeScreen() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const [savingsRes, reportsRes, listsRes] = await Promise.all([
+      const [savingsRes, reportsRes, listsRes, bannersRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/savings-summary`, { headers }).then(r => r.ok ? r.json() : null),
         fetch(`${BACKEND_URL}/api/price-reports/recent?limit=3`, { headers }).then(r => r.ok ? r.json() : []),
         fetch(`${BACKEND_URL}/api/shopping-lists`, { headers }).then(r => r.ok ? r.json() : []),
+        fetch(`${BACKEND_URL}/api/banners`).then(r => r.ok ? r.json() : []),
       ]);
       if (savingsRes) setSavings(savingsRes);
       setRecentReports(reportsRes || []);
       setMyLists(listsRes || []);
+      setBanners(bannersRes || []);
     } catch {} finally {
       setLoading(false);
       setRefreshing(false);
@@ -111,6 +114,29 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* Ad Banner */}
+        {banners.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} pagingEnabled style={s.bannerScroll}>
+            {banners.map((banner, i) => (
+              <TouchableOpacity
+                key={banner.banner_id}
+                testID={`ad-banner-${i}`}
+                style={[s.bannerCard, { backgroundColor: banner.bg_color }]}
+                activeOpacity={0.9}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.bannerLabel, { color: banner.text_color + '88' }]}>SPONSORED</Text>
+                  <Text style={[s.bannerTitle, { color: banner.text_color }]}>{banner.title}</Text>
+                  <Text style={[s.bannerSubtitle, { color: banner.text_color + 'CC' }]}>{banner.subtitle}</Text>
+                </View>
+                <View style={[s.bannerCta, { borderColor: banner.text_color + '55' }]}>
+                  <Text style={[s.bannerCtaText, { color: banner.text_color }]}>{banner.cta_text}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
         {/* Savings at a Glance */}
         <View style={s.savingsRow}>
           <View style={[s.savingsCard, { backgroundColor: colors.primary }]}>
@@ -129,14 +155,12 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Quick Actions — big, thumb-friendly buttons */}
+        {/* Quick Actions — just the essentials */}
         <Text style={s.sectionTitle}>Quick Actions</Text>
         <View style={s.actionsGrid}>
           {[
             { icon: 'swap-horizontal', label: 'Compare Prices', color: colors.primary, route: '/(tabs)/compare' },
             { icon: 'scan', label: 'Quick Scan', color: colors.secondary, route: '/(tabs)/scan' },
-            { icon: 'people', label: 'Leaderboard', color: '#9C27B0', route: '/(tabs)/community' },
-            { icon: 'car', label: 'Trip Planner', color: colors.accent, route: '/(tabs)/compare' },
           ].map((action, i) => (
             <TouchableOpacity
               key={i}
@@ -257,4 +281,16 @@ const createStyles = (colors: any) => StyleSheet.create({
   reportProduct: { fontSize: 14, fontWeight: '600', color: colors.text },
   reportStore: { fontSize: 12, color: colors.textSecondary },
   reportPrice: { fontSize: 16, fontWeight: '800', color: colors.primary },
+
+  // Banner
+  bannerScroll: { marginBottom: Spacing.l },
+  bannerCard: {
+    width: 300, borderRadius: Radius.l, padding: Spacing.m, marginRight: Spacing.m,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
+  },
+  bannerLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  bannerTitle: { fontSize: 16, fontWeight: '800', marginTop: 2 },
+  bannerSubtitle: { fontSize: 12, marginTop: 2 },
+  bannerCta: { borderWidth: 1.5, borderRadius: Radius.m, paddingHorizontal: 12, paddingVertical: 6 },
+  bannerCtaText: { fontSize: 12, fontWeight: '700' },
 });

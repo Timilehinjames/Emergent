@@ -509,27 +509,32 @@ async def scan_shelf_tag(request: Request):
     user = await get_current_user(request)
     body = await request.json()
     image_base64 = body.get("image_base64", "")
+    scan_type = body.get("scan_type", "single")  # "single", "receipt", "flyer"
     if not image_base64:
         raise HTTPException(status_code=400, detail="image_base64 required")
     if not EMERGENT_LLM_KEY:
         raise HTTPException(status_code=500, detail="OCR service not configured")
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+        if scan_type == "receipt":
+            system_msg = "You are a receipt reader for Trinidad and Tobago supermarkets. Extract ALL items from this receipt. Return ONLY valid JSON with key 'items' containing an array. Each item has: product_name (string), price (number in TTD), quantity (number, default 1), unit (string like 'each', 'kg', 'L', 'pack'). Also include 'store_name' (string) and 'total' (number) at the top level if visible. If unsure, leave as empty string or 0."
+            user_text = "Read this supermarket receipt and extract ALL line items with product names and prices. Return a JSON object with 'items' array, 'store_name', and 'total'."
+        elif scan_type == "flyer":
+            system_msg = "You are a sales flyer reader for Trinidad and Tobago stores. Extract ALL deals/specials from this flyer image. Return ONLY valid JSON with key 'items' containing an array. Each item has: product_name (string), price (number in TTD, the sale price), original_price (number, if shown), quantity (number, default 1), unit (string), discount_text (string, e.g. '20% OFF' or 'Buy 1 Get 1'). Also include 'store_name' (string) and 'valid_until' (string date if visible) at the top level."
+            user_text = "Read this sales flyer and extract ALL deals and special prices. Return a JSON object with 'items' array, 'store_name', and 'valid_until'."
+        else:
+            system_msg = "You are a price tag reader for Trinidad and Tobago supermarkets. Extract the product name, price in TTD, quantity, and unit from shelf tags. Return ONLY valid JSON with keys: product_name, price (number), store_name (if visible), quantity (number), unit (string like 'g', 'kg', 'ml', 'L', 'each', 'pack'), raw_text (any other text you see). If you can't read something, set it as empty string or 0."
+            user_text = "Read this shelf tag and extract the product name, price, quantity, and unit. Return ONLY valid JSON."
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"scan_{uuid.uuid4().hex[:8]}",
-            system_message="You are a price tag reader for Trinidad and Tobago supermarkets. Extract the product name, price in TTD, quantity, and unit from shelf tags or receipts. Return ONLY valid JSON with keys: product_name, price (number), store_name (if visible), quantity (number), unit (string like 'g', 'kg', 'ml', 'L', 'each', 'pack'), raw_text (any other text you see). If you can't read something, set it as empty string or 0."
+            system_message=system_msg
         )
         chat.with_model("openai", "gpt-5.2")
         image_content = ImageContent(image_base64=image_base64)
-        user_message = UserMessage(
-            text="Read this shelf tag or receipt and extract the product name, price, quantity, and unit. Return ONLY valid JSON.",
-            file_contents=[image_content]
-        )
+        user_message = UserMessage(text=user_text, file_contents=[image_content])
         response = await chat.send_message(user_message)
-        # Try to parse JSON from response
         try:
-            # Clean response - find JSON in the response
             resp_text = response.strip()
             if resp_text.startswith("```"):
                 resp_text = resp_text.split("```")[1]
@@ -537,18 +542,89 @@ async def scan_shelf_tag(request: Request):
                     resp_text = resp_text[4:]
             result = json.loads(resp_text)
         except json.JSONDecodeError:
-            result = {"raw_text": response, "product_name": "", "price": 0, "store_name": "", "quantity": 0, "unit": ""}
-        return {
-            "product_name": result.get("product_name", ""),
-            "price": float(result.get("price", 0)),
-            "store_name": result.get("store_name", ""),
-            "quantity": float(result.get("quantity", 0)),
-            "unit": result.get("unit", ""),
-            "raw_text": result.get("raw_text", "")
-        }
+            result = {"raw_text": response, "items": []}
+        if scan_type in ("receipt", "flyer"):
+            items = result.get("items", [])
+            return {
+                "scan_type": scan_type,
+                "store_name": result.get("store_name", ""),
+                "total": float(result.get("total", 0)),
+                "valid_until": result.get("valid_until", ""),
+                "items": [{
+                    "product_name": i.get("product_name", ""),
+                    "price": float(i.get("price", 0)),
+                    "original_price": float(i.get("original_price", 0)),
+                    "quantity": float(i.get("quantity", 1)),
+                    "unit": i.get("unit", "each"),
+                    "discount_text": i.get("discount_text", ""),
+                } for i in items],
+                "item_count": len(items),
+                "raw_text": result.get("raw_text", "")
+            }
+        else:
+            return {
+                "scan_type": "single",
+                "product_name": result.get("product_name", ""),
+                "price": float(result.get("price", 0)),
+                "store_name": result.get("store_name", ""),
+                "quantity": float(result.get("quantity", 0)),
+                "unit": result.get("unit", ""),
+                "raw_text": result.get("raw_text", "")
+            }
     except Exception as e:
         logger.error(f"OCR scan error: {e}")
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+
+# ============ SPECIALS / SALES ============
+
+@api_router.post("/specials")
+async def create_special(request: Request):
+    user = await get_current_user(request)
+    body = await request.json()
+    store_name = body.get("store_name", "")
+    items = body.get("items", [])
+    valid_until = body.get("valid_until", "")
+    photo_base64 = body.get("photo_base64", "")
+    title = body.get("title", f"Sale at {store_name}")
+    special_id = f"spc_{uuid.uuid4().hex[:8]}"
+    special_doc = {
+        "special_id": special_id,
+        "title": title,
+        "store_name": store_name,
+        "items": items,
+        "valid_until": valid_until,
+        "photo_base64": photo_base64[:200] if photo_base64 else "",
+        "posted_by_user_id": user["user_id"],
+        "posted_by_name": user.get("name", "Anonymous"),
+        "region": user.get("region", ""),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.specials.insert_one(special_doc)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 15}})
+    special_doc.pop("_id", None)
+    return {"special": special_doc, "points_earned": 15}
+
+@api_router.get("/specials")
+async def get_specials(region: str = "", limit: int = 20):
+    query = {}
+    if region:
+        query["region"] = region
+    specials = await db.specials.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return specials
+
+@api_router.get("/specials/{special_id}")
+async def get_special(special_id: str):
+    special = await db.specials.find_one({"special_id": special_id}, {"_id": 0})
+    if not special:
+        raise HTTPException(status_code=404, detail="Special not found")
+    return special
+
+# ============ AD BANNERS ============
+
+@api_router.get("/banners")
+async def get_banners():
+    banners = await db.banners.find({"active": True}, {"_id": 0}).sort("priority", -1).to_list(10)
+    return banners
 
 # ============ COMMUNITY & LEADERBOARD ============
 
@@ -807,6 +883,19 @@ async def seed_database():
     await db.price_reports.create_index("product_id")
     await db.price_reports.create_index("store_name")
     await db.price_reports.create_index([("created_at", -1)])
+    await db.specials.create_index([("created_at", -1)])
+    await db.specials.create_index("region")
+    await db.banners.create_index("active")
+    # Seed banners
+    banner_count = await db.banners.count_documents({})
+    if banner_count == 0:
+        banners = [
+            {"banner_id": "ban_1", "title": "Advertise Here", "subtitle": "Reach thousands of T&T shoppers daily", "cta_text": "Learn More", "cta_url": "", "bg_color": "#0277BD", "text_color": "#FFFFFF", "active": True, "priority": 10},
+            {"banner_id": "ban_2", "title": "Your Business Here", "subtitle": "Promote your store specials to savvy shoppers", "cta_text": "Contact Us", "cta_url": "", "bg_color": "#2E7D32", "text_color": "#FFFFFF", "active": True, "priority": 5},
+            {"banner_id": "ban_3", "title": "Featured Partner", "subtitle": "Premium ad placement available for T&T businesses", "cta_text": "Get Started", "cta_url": "", "bg_color": "#E65100", "text_color": "#FFFFFF", "active": True, "priority": 3},
+        ]
+        await db.banners.insert_many(banners)
+        logger.info("Seeded banners")
 
 @app.on_event("startup")
 async def startup():

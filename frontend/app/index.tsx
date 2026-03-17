@@ -71,8 +71,8 @@ export default function AuthScreen() {
             <View style={s.logoContainer}>
               <Ionicons name="cart" size={48} color={colors.primaryForeground} />
             </View>
-            <Text style={s.appName}>TriniSaver</Text>
-            <Text style={s.tagline}>Smart Shopping for Trinidad & Tobago</Text>
+            <Text style={s.appName}>Dotish Prices TT</Text>
+            <Text style={s.tagline}>Dodge d' dotish prices! Shop smart</Text>
           </View>
 
           {/* Form Card */}

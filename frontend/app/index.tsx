@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert
+  KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Linking
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { TT_REGIONS, Spacing, Radius } from '../src/constants/theme';
 
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+
 export default function AuthScreen() {
-  const { user, loading, login, register } = useAuth();
+  const { user, loading, login, register, loginWithGoogle } = useAuth();
   const { colors } = useTheme();
   const router = useRouter();
   const [isLogin, setIsLogin] = useState(true);
@@ -21,6 +24,7 @@ export default function AuthScreen() {
   const [region, setRegion] = useState('North');
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && user) {
@@ -60,6 +64,44 @@ export default function AuthScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+  const handleGoogleSignIn = async () => {
+    setSocialLoading('google');
+    try {
+      // For web, use window.location; for mobile, use deep linking
+      const redirectUrl = Platform.OS === 'web' 
+        ? `${window.location.origin}/auth-callback`
+        : `${BACKEND_URL}/api/auth/mobile-callback`;
+      
+      const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+      
+      if (Platform.OS === 'web') {
+        window.location.href = authUrl;
+      } else {
+        // For mobile, open in browser and handle deep link
+        const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+        if (result.type === 'success' && result.url) {
+          const url = new URL(result.url);
+          const sessionId = url.hash?.split('session_id=')[1]?.split('&')[0];
+          if (sessionId) {
+            await loginWithGoogle(sessionId);
+            router.replace('/(tabs)');
+          }
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Error', 'Google sign-in failed. Please try again.');
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    // Apple Sign-In would require expo-apple-authentication
+    // For now, show coming soon message
+    Alert.alert('Coming Soon', 'Apple Sign-In will be available soon!');
   };
 
   return (
@@ -167,6 +209,50 @@ export default function AuthScreen() {
               )}
             </TouchableOpacity>
 
+            {/* Divider */}
+            <View style={s.dividerRow}>
+              <View style={s.dividerLine} />
+              <Text style={s.dividerText}>or continue with</Text>
+              <View style={s.dividerLine} />
+            </View>
+
+            {/* Social Login Buttons */}
+            <View style={s.socialRow}>
+              <TouchableOpacity
+                testID="google-signin-btn"
+                style={s.socialBtn}
+                onPress={handleGoogleSignIn}
+                disabled={socialLoading !== null}
+              >
+                {socialLoading === 'google' ? (
+                  <ActivityIndicator size="small" color={colors.text} />
+                ) : (
+                  <>
+                    <View style={s.googleIcon}>
+                      <Text style={{ fontSize: 18 }}>G</Text>
+                    </View>
+                    <Text style={s.socialBtnText}>Google</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                testID="apple-signin-btn"
+                style={[s.socialBtn, s.appleSocialBtn]}
+                onPress={handleAppleSignIn}
+                disabled={socialLoading !== null}
+              >
+                {socialLoading === 'apple' ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-apple" size={20} color="#FFFFFF" />
+                    <Text style={[s.socialBtnText, { color: '#FFFFFF' }]}>Apple</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
             <TouchableOpacity testID="auth-toggle-btn" style={s.toggleBtn} onPress={() => setIsLogin(!isLogin)}>
               <Text style={s.toggleText}>
                 {isLogin ? "Don't have an account? " : 'Already have an account? '}
@@ -244,6 +330,21 @@ const createStyles = (colors: any) => StyleSheet.create({
     shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
   },
   submitText: { color: colors.primaryForeground, fontSize: 17, fontWeight: '700' },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: Spacing.l },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  dividerText: { paddingHorizontal: Spacing.m, fontSize: 13, color: colors.textSecondary },
+  socialRow: { flexDirection: 'row', gap: Spacing.m },
+  socialBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.s,
+    backgroundColor: colors.surface, borderRadius: Radius.m, height: 50,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  appleSocialBtn: { backgroundColor: '#000000', borderColor: '#000000' },
+  googleIcon: {
+    width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF',
+    justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#DDD',
+  },
+  socialBtnText: { fontSize: 15, fontWeight: '600', color: colors.text },
   toggleBtn: { alignItems: 'center', marginTop: Spacing.m, paddingVertical: Spacing.s },
   toggleText: { fontSize: 15, color: colors.textSecondary },
   features: { marginTop: Spacing.xl, gap: Spacing.m },

@@ -312,7 +312,7 @@ export default function SpecialsScreen() {
                   )}
                   <TouchableOpacity testID="post-special-btn" style={s.postBtn} onPress={postSpecial} disabled={uploading}>
                     {uploading ? <ActivityIndicator color={colors.primaryForeground} /> : (
-                      <><Ionicons name="megaphone" size={18} color={colors.primaryForeground} /><Text style={s.postBtnText}>Post Special (+15 pts)</Text></>
+                      <><Ionicons name="megaphone" size={18} color={colors.primaryForeground} /><Text style={s.postBtnText}>Post Special (+1 pt)</Text></>
                     )}
                   </TouchableOpacity>
                 </>

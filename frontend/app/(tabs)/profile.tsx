@@ -205,21 +205,22 @@ export default function ProfileScreen() {
         {/* Points & Rewards Info */}
         <View style={s.settingCard}>
           <Text style={s.settingCardTitle}>Points & Rewards</Text>
+          <Text style={s.rewardInfo}>1 point = $0.10 TTD</Text>
           <View style={s.rewardRow}>
-            <Ionicons name="camera" size={18} color={colors.secondary} />
-            <Text style={s.rewardText}>Photo price report: <Text style={s.rewardPoints}>+10 pts</Text></Text>
+            <Ionicons name="pricetag" size={18} color={colors.secondary} />
+            <Text style={s.rewardText}>Price report (any type): <Text style={s.rewardPoints}>+1 pt</Text></Text>
           </View>
           <View style={s.rewardRow}>
-            <Ionicons name="create" size={18} color={colors.primary} />
-            <Text style={s.rewardText}>Manual price report: <Text style={s.rewardPoints}>+5 pts</Text></Text>
+            <Ionicons name="megaphone" size={18} color={colors.primary} />
+            <Text style={s.rewardText}>Post a special/flyer: <Text style={s.rewardPoints}>+1 pt</Text></Text>
           </View>
           <View style={s.rewardRow}>
-            <Ionicons name="gift" size={18} color={colors.accent} />
+            <Ionicons name="flag" size={18} color={colors.accent} />
+            <Text style={s.rewardText}>Flag outdated price: <Text style={s.rewardPoints}>+1 pt</Text></Text>
+          </View>
+          <View style={s.rewardRow}>
+            <Ionicons name="gift" size={18} color="#9C27B0" />
             <Text style={s.rewardText}>Redeem for mobile top-ups (Coming Soon)</Text>
-          </View>
-          <View style={s.rewardRow}>
-            <Ionicons name="ticket" size={18} color="#E91E63" />
-            <Text style={s.rewardText}>Digital coupons (Coming Soon)</Text>
           </View>
         </View>
 
@@ -284,6 +285,12 @@ const createStyles = (colors: any) => StyleSheet.create({
   rewardRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.s, paddingVertical: 8 },
   rewardText: { fontSize: 14, color: colors.text, flex: 1 },
   rewardPoints: { fontWeight: '700', color: colors.secondary },
+  rewardInfo: {
+    fontSize: 16, fontWeight: '700', color: colors.success,
+    marginBottom: Spacing.s, textAlign: 'center',
+    backgroundColor: colors.success + '12', paddingVertical: 8, paddingHorizontal: Spacing.m,
+    borderRadius: Radius.m, overflow: 'hidden',
+  },
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: Spacing.s, paddingVertical: Spacing.m, marginTop: Spacing.m,

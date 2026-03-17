@@ -503,7 +503,7 @@ export default function CompareScreen() {
                   ) : (
                     <>
                       <Ionicons name="add-circle" size={20} color={colors.primaryForeground} />
-                      <Text style={s.submitStoreBtnText}>Add Store (+5 pts)</Text>
+                      <Text style={s.submitStoreBtnText}>Add Store (+1 pt)</Text>
                     </>
                   )}
                 </TouchableOpacity>

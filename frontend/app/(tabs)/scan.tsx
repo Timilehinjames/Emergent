@@ -321,7 +321,7 @@ export default function ScanScreen() {
                       </TouchableOpacity>
                     </>
                   )}
-                  <Text style={s.pointsHint}>{isMulti ? '+5 pts per item reported' : 'Earn 10 points for photo reports!'}</Text>
+                  <Text style={s.pointsHint}>{isMulti ? '+1 pt per item reported' : 'Earn 1 point per report! (= $0.10 TTD)'}</Text>
                 </View>
               )}
 

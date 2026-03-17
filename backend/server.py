@@ -288,10 +288,10 @@ async def create_store(request: Request):
     await db.stores.insert_one(store_doc)
     # Also add to trip planner locations
     TT_STORES_LOCATIONS[name] = {"lat": lat, "lng": lng, "region": region}
-    # Award points for adding a store
-    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 5}})
+    # Award 1 point for adding a store (1 point = $0.10 TTD)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 1}})
     store_doc.pop("_id", None)
-    return {"store": store_doc, "points_earned": 5}
+    return {"store": store_doc, "points_earned": 1}
 
 @api_router.get("/categories")
 async def get_categories():
@@ -370,8 +370,8 @@ async def create_price_report(request: Request):
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.price_reports.insert_one(report)
-    # Award points
-    points_earned = 10 if photo_base64 else 5
+    # Award 1 point per report (1 point = $0.10 TTD)
+    points_earned = 1
     await db.users.update_one(
         {"user_id": user["user_id"]},
         {"$inc": {"points": points_earned}}
@@ -430,12 +430,12 @@ async def flag_as_outdated(item_type: str, item_id: str, request: Request):
         # Allow re-submission by clearing the dedup hash
         update["$set"]["image_hash"] = ""
     await collection.update_one({id_field: item_id}, update)
-    # Award 2 points for flagging
-    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 2}})
+    # Award 1 point for flagging (1 point = $0.10 TTD)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 1}})
     return {
         "flag_count": flag_count,
         "is_outdated": is_outdated,
-        "points_earned": 2,
+        "points_earned": 1,
         "message": "Marked as outdated! This price can now be re-reported." if is_outdated else f"Flagged ({flag_count}/{FLAG_THRESHOLD} needed to mark outdated)"
     }
 
@@ -706,9 +706,10 @@ async def create_special(request: Request):
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.specials.insert_one(special_doc)
-    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 15}})
+    # Award 1 point for posting special (1 point = $0.10 TTD)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 1}})
     special_doc.pop("_id", None)
-    return {"special": special_doc, "points_earned": 15}
+    return {"special": special_doc, "points_earned": 1}
 
 @api_router.get("/specials")
 async def get_specials(region: str = "", limit: int = 20):

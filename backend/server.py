@@ -407,7 +407,7 @@ async def search_price_reports(product: str = "", store: str = "", limit: int = 
 FLAG_THRESHOLD = 3  # Number of flags before auto-marking as outdated
 
 # Admin emails (hardcoded for MVP - can be moved to DB later)
-ADMIN_EMAILS = ["admin@dohpaydat.com", "admin@test.com"]
+ADMIN_EMAILS = ["admin@dohpaydatt.com", "admin@test.com"]
 
 async def require_admin(request: Request) -> dict:
     """Check if user is admin"""
@@ -1554,7 +1554,7 @@ async def get_traffic_status(request: Request):
 @app.on_event("startup")
 async def startup():
     await seed_database()
-    logger.info("Doh Pay Dat API started")
+    logger.info("DohPayDaTT API started")
 
 app.include_router(api_router)
 

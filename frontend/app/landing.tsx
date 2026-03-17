@@ -90,7 +90,7 @@ export default function LandingPage() {
               <View style={s.logoIcon}>
                 <Ionicons name="cart" size={32} color="#FF6B35" />
               </View>
-              <Text style={s.logoText}>Doh Pay Dat</Text>
+              <Text style={s.logoText}>DohPayDaTT</Text>
             </View>
 
             {/* Main Headline */}
@@ -206,7 +206,7 @@ export default function LandingPage() {
 
       {/* Social Proof / Testimonials */}
       <View style={s.testimonialsSection}>
-        <Text style={s.sectionLabel}>THE "DOH PAY DAT" COMMUNITY</Text>
+        <Text style={s.sectionLabel}>THE "DOHPAYDATT" COMMUNITY</Text>
         <Text style={s.sectionTitle}>Real Trinis, Real Savings</Text>
         
         {TESTIMONIALS.map((t, i) => (
@@ -269,7 +269,7 @@ export default function LandingPage() {
         <View style={s.footerTop}>
           <View style={s.footerBrand}>
             <Ionicons name="cart" size={24} color="#FF6B35" />
-            <Text style={s.footerBrandText}>Doh Pay Dat</Text>
+            <Text style={s.footerBrandText}>DohPayDaTT</Text>
           </View>
           <Text style={s.footerTagline}>Dodge d' dotish prices! Shop smart.</Text>
         </View>
@@ -291,7 +291,7 @@ export default function LandingPage() {
           <Text style={s.partnersText}>bmobile & Digicel Rewards</Text>
         </View>
 
-        <Text style={s.copyright}>© 2025 Doh Pay Dat. Made with ❤️ in Trinidad & Tobago.</Text>
+        <Text style={s.copyright}>© 2025 DohPayDaTT. Made with ❤️ in Trinidad & Tobago.</Text>
       </View>
     </ScrollView>
   );

@@ -27,6 +27,7 @@ export default function SpecialsScreen() {
   const [flyerTitle, setFlyerTitle] = useState('');
   const [flyerStore, setFlyerStore] = useState('');
   const [expandedSpecial, setExpandedSpecial] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const flagSpecial = async (specialId: string) => {
     try {
@@ -93,6 +94,7 @@ export default function SpecialsScreen() {
   const postSpecial = async () => {
     if (!flyerTitle.trim()) { Alert.alert('Missing', 'Please add a title'); return; }
     setUploading(true);
+    setUploadError(null);
     try {
       const resp = await fetch(`${BACKEND_URL}/api/specials`, {
         method: 'POST', headers: headers(),
@@ -111,16 +113,24 @@ export default function SpecialsScreen() {
         fetchSpecials();
       } else if (resp.status === 409) {
         const err = await resp.json().catch(() => ({}));
-        Alert.alert('Already Posted', err.detail || 'This flyer has already been shared');
+        const errorMsg = err.detail || 'This flyer has already been shared';
+        setUploadError(errorMsg);
+        Alert.alert('Duplicate Detected', errorMsg);
       } else {
-        Alert.alert('Error', 'Failed to post');
+        const errorMsg = 'Failed to post. Please try again.';
+        setUploadError(errorMsg);
+        Alert.alert('Error', errorMsg);
       }
-    } catch { Alert.alert('Error', 'Failed to post'); } finally { setUploading(false); }
+    } catch (e) {
+      const errorMsg = 'Network error. Please check your connection.';
+      setUploadError(errorMsg);
+      Alert.alert('Error', errorMsg);
+    } finally { setUploading(false); }
   };
 
   const resetUpload = () => {
     setShowUpload(false); setFlyerImage(null); setScanResult(null);
-    setFlyerTitle(''); setFlyerStore('');
+    setFlyerTitle(''); setFlyerStore(''); setUploadError(null);
   };
 
   const s = createStyles(colors);
@@ -292,8 +302,14 @@ export default function SpecialsScreen() {
                       {scanResult.items.length > 5 && <Text style={s.moreItems}>+{scanResult.items.length - 5} more items</Text>}
                     </View>
                   )}
-                  <TextInput testID="flyer-title-input" style={s.input} placeholder="Title (e.g. Massy Weekend Sale)" placeholderTextColor={colors.textSecondary} value={flyerTitle} onChangeText={setFlyerTitle} />
-                  <TextInput testID="flyer-store-input" style={s.input} placeholder="Store name" placeholderTextColor={colors.textSecondary} value={flyerStore} onChangeText={setFlyerStore} />
+                  <TextInput testID="flyer-title-input" style={s.input} placeholder="Title (e.g. Massy Weekend Sale)" placeholderTextColor={colors.textSecondary} value={flyerTitle} onChangeText={(t) => { setFlyerTitle(t); setUploadError(null); }} />
+                  <TextInput testID="flyer-store-input" style={s.input} placeholder="Store name" placeholderTextColor={colors.textSecondary} value={flyerStore} onChangeText={(t) => { setFlyerStore(t); setUploadError(null); }} />
+                  {uploadError && (
+                    <View style={s.errorBanner}>
+                      <Ionicons name="alert-circle" size={20} color={colors.error} />
+                      <Text style={s.errorText}>{uploadError}</Text>
+                    </View>
+                  )}
                   <TouchableOpacity testID="post-special-btn" style={s.postBtn} onPress={postSpecial} disabled={uploading}>
                     {uploading ? <ActivityIndicator color={colors.primaryForeground} /> : (
                       <><Ionicons name="megaphone" size={18} color={colors.primaryForeground} /><Text style={s.postBtnText}>Post Special (+15 pts)</Text></>
@@ -411,6 +427,12 @@ const createStyles = (colors: any) => StyleSheet.create({
     backgroundColor: colors.inputBg, borderRadius: Radius.m, paddingHorizontal: Spacing.m,
     height: 44, fontSize: 15, color: colors.text, marginBottom: Spacing.s,
   },
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.s,
+    backgroundColor: colors.error + '15', borderRadius: Radius.m, padding: Spacing.m,
+    marginBottom: Spacing.m, borderWidth: 1, borderColor: colors.error + '30',
+  },
+  errorText: { flex: 1, fontSize: 14, color: colors.error, fontWeight: '600' },
   postBtn: {
     flexDirection: 'row', backgroundColor: colors.secondary, borderRadius: Radius.full,
     height: 50, justifyContent: 'center', alignItems: 'center', gap: Spacing.s, marginTop: Spacing.s,

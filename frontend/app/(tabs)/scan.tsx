@@ -23,6 +23,7 @@ export default function ScanScreen() {
   const [scanResult, setScanResult] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   // Single item fields
   const [productName, setProductName] = useState('');
   const [price, setPrice] = useState('');
@@ -94,6 +95,7 @@ export default function ScanScreen() {
       return;
     }
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -111,11 +113,19 @@ export default function ScanScreen() {
         Alert.alert('Success', `Price reported! +${data.points_earned} points`);
       } else if (resp.status === 409) {
         const err = await resp.json().catch(() => ({}));
-        Alert.alert('Already Reported', err.detail || 'This price has already been reported');
+        const errorMsg = err.detail || 'This price has already been reported';
+        setSubmitError(errorMsg);
+        Alert.alert('Duplicate Detected', errorMsg);
       } else {
-        Alert.alert('Error', 'Failed to submit report');
+        const errorMsg = 'Failed to submit report. Please try again.';
+        setSubmitError(errorMsg);
+        Alert.alert('Error', errorMsg);
       }
-    } catch { Alert.alert('Error', 'Failed to submit'); } finally { setSubmitting(false); }
+    } catch {
+      const errorMsg = 'Network error. Please check your connection.';
+      setSubmitError(errorMsg);
+      Alert.alert('Error', errorMsg);
+    } finally { setSubmitting(false); }
   };
 
   const submitMultiple = async () => {
@@ -124,6 +134,7 @@ export default function ScanScreen() {
       return;
     }
     setSubmitting(true);
+    setSubmitError(null);
     let totalPoints = 0;
     let duplicates = 0;
     try {
@@ -148,23 +159,29 @@ export default function ScanScreen() {
           duplicates++;
         }
       }
-      setSubmitted(true);
       const reported = selectedItems.size - duplicates;
       if (duplicates > 0 && reported > 0) {
+        setSubmitted(true);
         Alert.alert('Partially Submitted', `${reported} new item(s) reported (+${totalPoints} pts). ${duplicates} skipped as duplicates.`);
       } else if (duplicates > 0 && reported === 0) {
-        Alert.alert('Already Reported', 'All items were already reported for this store.');
-        setSubmitted(false);
+        const errorMsg = `All ${duplicates} items were already reported for this store today.`;
+        setSubmitError(errorMsg);
+        Alert.alert('All Duplicates', errorMsg);
       } else {
+        setSubmitted(true);
         Alert.alert('All Reported!', `${reported} items submitted. +${totalPoints} points total!`);
       }
-    } catch { Alert.alert('Error', 'Some items failed'); } finally { setSubmitting(false); }
+    } catch {
+      const errorMsg = 'Some items failed to submit. Please try again.';
+      setSubmitError(errorMsg);
+      Alert.alert('Error', errorMsg);
+    } finally { setSubmitting(false); }
   };
 
   const reset = () => {
     setImageBase64(null); setScanResult(null); setProductName(''); setPrice('');
     setStoreName(STORE_NAMES[0]); setQuantity('1'); setUnit('each');
-    setSubmitted(false); setSelectedItems(new Set());
+    setSubmitted(false); setSelectedItems(new Set()); setSubmitError(null);
   };
 
   const s = createStyles(colors);
@@ -269,6 +286,12 @@ export default function ScanScreen() {
                         );
                       })}
                       {scanResult.total > 0 && <Text style={s.totalText}>Receipt Total: ${scanResult.total.toFixed(2)} TTD</Text>}
+                      {submitError && (
+                        <View style={s.errorBanner}>
+                          <Ionicons name="alert-circle" size={20} color={colors.error} />
+                          <Text style={s.errorText}>{submitError}</Text>
+                        </View>
+                      )}
                       <TouchableOpacity testID="submit-multi-btn" style={s.submitBtn} onPress={submitMultiple} disabled={submitting}>
                         {submitting ? <ActivityIndicator color={colors.primaryForeground} /> : (
                           <><Ionicons name="cloud-upload" size={18} color={colors.primaryForeground} /><Text style={s.submitBtnText}>Report {selectedItems.size} Items</Text></>
@@ -285,6 +308,12 @@ export default function ScanScreen() {
                         <View style={[s.inputGroup, { flex: 0.6 }]}><Text style={s.label}>Qty</Text><TextInput testID="scan-qty-input" style={s.input} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholderTextColor={colors.textSecondary} /></View>
                         <View style={[s.inputGroup, { flex: 0.6 }]}><Text style={s.label}>Unit</Text><TextInput testID="scan-unit-input" style={s.input} value={unit} onChangeText={setUnit} placeholderTextColor={colors.textSecondary} /></View>
                       </View>
+                      {submitError && (
+                        <View style={s.errorBanner}>
+                          <Ionicons name="alert-circle" size={20} color={colors.error} />
+                          <Text style={s.errorText}>{submitError}</Text>
+                        </View>
+                      )}
                       <TouchableOpacity testID="submit-report-btn" style={s.submitBtn} onPress={submitSingle} disabled={submitting}>
                         {submitting ? <ActivityIndicator color={colors.primaryForeground} /> : (
                           <><Ionicons name="cloud-upload" size={18} color={colors.primaryForeground} /><Text style={s.submitBtnText}>Submit Price Report</Text></>
@@ -383,6 +412,12 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   submitBtnText: { fontSize: 16, fontWeight: '700', color: colors.secondaryForeground },
   pointsHint: { fontSize: 12, color: colors.accent, textAlign: 'center', marginTop: Spacing.s, fontWeight: '600' },
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.s,
+    backgroundColor: colors.error + '15', borderRadius: Radius.m, padding: Spacing.m,
+    marginTop: Spacing.s, borderWidth: 1, borderColor: colors.error + '30',
+  },
+  errorText: { flex: 1, fontSize: 14, color: colors.error, fontWeight: '600' },
   successCard: {
     backgroundColor: colors.surface, borderRadius: Radius.xl, padding: Spacing.xl, alignItems: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,

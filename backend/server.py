@@ -547,29 +547,29 @@ async def scan_shelf_tag(request: Request):
             items = result.get("items", [])
             return {
                 "scan_type": scan_type,
-                "store_name": result.get("store_name", ""),
-                "total": float(result.get("total", 0)),
-                "valid_until": result.get("valid_until", ""),
+                "store_name": result.get("store_name", "") or "",
+                "total": float(result.get("total", 0) or 0),
+                "valid_until": result.get("valid_until", "") or "",
                 "items": [{
-                    "product_name": i.get("product_name", ""),
-                    "price": float(i.get("price", 0)),
-                    "original_price": float(i.get("original_price", 0)),
-                    "quantity": float(i.get("quantity", 1)),
-                    "unit": i.get("unit", "each"),
-                    "discount_text": i.get("discount_text", ""),
-                } for i in items],
+                    "product_name": (i.get("product_name", "") or ""),
+                    "price": float(i.get("price", 0) or 0),
+                    "original_price": float(i.get("original_price", 0) or 0),
+                    "quantity": float(i.get("quantity", 1) or 1),
+                    "unit": (i.get("unit", "each") or "each"),
+                    "discount_text": (i.get("discount_text", "") or ""),
+                } for i in items if i.get("product_name")],
                 "item_count": len(items),
-                "raw_text": result.get("raw_text", "")
+                "raw_text": result.get("raw_text", "") or ""
             }
         else:
             return {
                 "scan_type": "single",
-                "product_name": result.get("product_name", ""),
-                "price": float(result.get("price", 0)),
-                "store_name": result.get("store_name", ""),
-                "quantity": float(result.get("quantity", 0)),
-                "unit": result.get("unit", ""),
-                "raw_text": result.get("raw_text", "")
+                "product_name": result.get("product_name", "") or "",
+                "price": float(result.get("price", 0) or 0),
+                "store_name": result.get("store_name", "") or "",
+                "quantity": float(result.get("quantity", 0) or 0),
+                "unit": result.get("unit", "") or "",
+                "raw_text": result.get("raw_text", "") or ""
             }
     except Exception as e:
         logger.error(f"OCR scan error: {e}")

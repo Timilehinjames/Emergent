@@ -1223,6 +1223,255 @@ async def admin_check(request: Request):
     is_admin = user.get("email") in ADMIN_EMAILS or user.get("is_admin", False)
     return {"is_admin": is_admin}
 
+# ============ ADMIN PRODUCT MANAGEMENT ============
+
+@api_router.get("/admin/products")
+async def admin_get_products(request: Request, category: str = "", search: str = ""):
+    """Get all products for admin categorization"""
+    await require_admin(request)
+    query = {}
+    if category:
+        query["category"] = category
+    if search:
+        query["name"] = {"$regex": search, "$options": "i"}
+    products = await db.products.find(query, {"_id": 0}).sort("name", 1).to_list(200)
+    return products
+
+@api_router.put("/admin/products/{product_id}")
+async def admin_update_product(product_id: str, request: Request):
+    """Update product category and details"""
+    await require_admin(request)
+    body = await request.json()
+    update_fields = {}
+    if "category" in body:
+        update_fields["category"] = body["category"]
+    if "name" in body:
+        update_fields["name"] = body["name"]
+    if "unit_type" in body:
+        update_fields["unit_type"] = body["unit_type"]
+    if "brand" in body:
+        update_fields["brand"] = body["brand"]
+    if "tags" in body:
+        update_fields["tags"] = body["tags"]  # e.g., ["toiletry", "pennywise-special"]
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.products.update_one({"product_id": product_id}, {"$set": update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return {"message": "Product updated"}
+
+@api_router.post("/admin/products")
+async def admin_create_product(request: Request):
+    """Create a new product"""
+    await require_admin(request)
+    body = await request.json()
+    if not body.get("name") or not body.get("category"):
+        raise HTTPException(status_code=400, detail="Name and category required")
+    product = {
+        "product_id": f"prod_{uuid.uuid4().hex[:8]}",
+        "name": body["name"],
+        "category": body["category"],
+        "unit_type": body.get("unit_type", "each"),
+        "brand": body.get("brand", ""),
+        "tags": body.get("tags", []),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.products.insert_one(product)
+    product.pop("_id", None)
+    return product
+
+@api_router.delete("/admin/products/{product_id}")
+async def admin_delete_product(product_id: str, request: Request):
+    """Delete a product"""
+    await require_admin(request)
+    result = await db.products.delete_one({"product_id": product_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return {"message": "Product deleted"}
+
+# ============ SMART SPLIT SHOPPING LIST ============
+
+# Store specialties - what each store is known for offering best prices on
+STORE_SPECIALTIES = {
+    "PriceSmart": {
+        "categories": ["Meat & Poultry", "Dairy", "Beverages"],
+        "tags": ["bulk", "wholesale"],
+        "savings_percent": 15,
+        "membership_required": True,
+    },
+    "Pennywise": {
+        "categories": ["Toiletries", "Personal Care", "Cleaning"],
+        "tags": ["toiletry", "pennywise-special"],
+        "savings_percent": 20,
+        "membership_required": False,
+    },
+    "Massy Stores": {
+        "categories": ["General", "Snacks", "Beverages"],
+        "tags": [],
+        "savings_percent": 5,
+        "membership_required": False,
+    },
+    "JTA Supermarket": {
+        "categories": ["Grains & Rice", "Cooking Oil", "Baking"],
+        "tags": ["local", "staples"],
+        "savings_percent": 10,
+        "membership_required": False,
+    },
+    "Xtra Foods": {
+        "categories": ["Meat & Poultry", "Grains & Rice"],
+        "tags": [],
+        "savings_percent": 8,
+        "membership_required": False,
+    },
+}
+
+# Mocked traffic data for Trinidad zones
+ZONE_TRAFFIC = {
+    "Port of Spain": {"peak_delay_mins": 45, "off_peak_delay_mins": 15},
+    "San Fernando": {"peak_delay_mins": 35, "off_peak_delay_mins": 12},
+    "Chaguanas": {"peak_delay_mins": 40, "off_peak_delay_mins": 15},
+    "East-West Corridor": {"peak_delay_mins": 50, "off_peak_delay_mins": 20},
+    "North": {"peak_delay_mins": 25, "off_peak_delay_mins": 10},
+    "South": {"peak_delay_mins": 30, "off_peak_delay_mins": 12},
+    "Central": {"peak_delay_mins": 35, "off_peak_delay_mins": 15},
+    "Tobago": {"peak_delay_mins": 15, "off_peak_delay_mins": 8},
+}
+
+def is_peak_hours():
+    """Check if current time is peak traffic hours (7-9 AM or 4-7 PM)"""
+    now = datetime.now()
+    hour = now.hour
+    return (7 <= hour <= 9) or (16 <= hour <= 19)
+
+@api_router.post("/smart-split")
+async def smart_split_list(request: Request):
+    """Analyze a shopping list and suggest optimal store splits"""
+    user = await get_current_user(request)
+    body = await request.json()
+    items = body.get("items", [])
+    user_region = body.get("region", user.get("region", "East-West Corridor"))
+    is_pricesmart_member = body.get("is_pricesmart_member", False)
+    prefer_single_store = body.get("prefer_single_store", False)
+    
+    if not items:
+        return {"splits": [], "message": "No items provided"}
+    
+    # Group items by best store
+    store_items: dict = {}
+    item_assignments: dict = {}
+    
+    for item in items:
+        item_name = item.get("name", "")
+        item_category = item.get("category", "General")
+        item_tags = item.get("tags", [])
+        
+        # Find best store for this item
+        best_store = "Massy Stores"  # Default
+        best_savings = 0
+        
+        for store_name, specialty in STORE_SPECIALTIES.items():
+            # Skip PriceSmart if not a member
+            if specialty["membership_required"] and not is_pricesmart_member:
+                continue
+            
+            score = 0
+            if item_category in specialty["categories"]:
+                score += specialty["savings_percent"]
+            for tag in item_tags:
+                if tag in specialty["tags"]:
+                    score += 5
+            
+            if score > best_savings:
+                best_savings = score
+                best_store = store_name
+        
+        # Assign item to store
+        if best_store not in store_items:
+            store_items[best_store] = []
+        store_items[best_store].append({
+            **item,
+            "estimated_savings_percent": best_savings,
+        })
+        item_assignments[item_name] = best_store
+    
+    # Calculate traffic considerations
+    is_peak = is_peak_hours()
+    traffic_data = ZONE_TRAFFIC.get(user_region, {"peak_delay_mins": 30, "off_peak_delay_mins": 15})
+    delay_per_store = traffic_data["peak_delay_mins"] if is_peak else traffic_data["off_peak_delay_mins"]
+    
+    num_stores = len(store_items)
+    total_travel_time = num_stores * delay_per_store
+    
+    # Build splits response
+    splits = []
+    total_estimated_savings = 0
+    
+    for store_name, store_item_list in store_items.items():
+        specialty = STORE_SPECIALTIES.get(store_name, {})
+        avg_savings = sum(i.get("estimated_savings_percent", 0) for i in store_item_list) / len(store_item_list) if store_item_list else 0
+        total_estimated_savings += avg_savings * len(store_item_list)
+        
+        splits.append({
+            "store": store_name,
+            "items": store_item_list,
+            "item_count": len(store_item_list),
+            "specialties": specialty.get("categories", []),
+            "membership_required": specialty.get("membership_required", False),
+            "average_savings_percent": round(avg_savings, 1),
+        })
+    
+    # Sort by item count (most items first)
+    splits.sort(key=lambda x: x["item_count"], reverse=True)
+    
+    # Generate recommendation
+    if prefer_single_store or (is_peak and total_travel_time > 60):
+        # Recommend single store trip
+        main_store = splits[0]["store"] if splits else "Massy Stores"
+        recommendation = {
+            "type": "single_store",
+            "reason": f"Heavy traffic detected ({delay_per_store} min delays). Single store trip recommended.",
+            "suggested_store": main_store,
+            "estimated_time_saved": total_travel_time - delay_per_store,
+        }
+    else:
+        recommendation = {
+            "type": "multi_store",
+            "reason": f"Split your list across {num_stores} stores for maximum savings.",
+            "stores": [s["store"] for s in splits],
+            "estimated_total_time": total_travel_time,
+        }
+    
+    return {
+        "splits": splits,
+        "recommendation": recommendation,
+        "traffic_status": {
+            "is_peak_hours": is_peak,
+            "region": user_region,
+            "delay_per_store_mins": delay_per_store,
+            "total_estimated_travel_mins": total_travel_time,
+        },
+        "total_items": len(items),
+        "stores_needed": num_stores,
+        "average_savings_percent": round(total_estimated_savings / len(items), 1) if items else 0,
+    }
+
+@api_router.get("/traffic-status")
+async def get_traffic_status(request: Request):
+    """Get current traffic status for user's region"""
+    user = await get_current_user(request)
+    region = user.get("region", "East-West Corridor")
+    is_peak = is_peak_hours()
+    traffic_data = ZONE_TRAFFIC.get(region, {"peak_delay_mins": 30, "off_peak_delay_mins": 15})
+    
+    return {
+        "region": region,
+        "is_peak_hours": is_peak,
+        "current_delay_mins": traffic_data["peak_delay_mins"] if is_peak else traffic_data["off_peak_delay_mins"],
+        "peak_delay_mins": traffic_data["peak_delay_mins"],
+        "off_peak_delay_mins": traffic_data["off_peak_delay_mins"],
+        "recommendation": "Consider single-store trip" if is_peak else "Good time for multi-store trip",
+    }
+
 @app.on_event("startup")
 async def startup():
     await seed_database()

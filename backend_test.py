@@ -191,7 +191,7 @@ async def main():
             
         if client.regular_token:
             regular_check = await client.make_api_call("GET", "/admin/check", client.regular_token)
-            if regular_check["success"] and admin_check["data"].get("is_admin") is False:
+            if regular_check["success"] and regular_check["data"].get("is_admin") is False:
                 log_test("Admin check with regular user", True)
             else:
                 log_test("Admin check with regular user", False, f"Expected is_admin=False, got {regular_check}")
@@ -237,8 +237,10 @@ async def main():
         # Step 5: Create test data for flagging tests
         print("\n📝 Creating test data...")
         
-        # Create a price report
-        report = await client.create_price_report(client.admin_token, "Test Rice 5kg", "Test Store", 89.99)
+        # Create a price report with unique data
+        import time
+        unique_suffix = str(int(time.time()))
+        report = await client.create_price_report(client.admin_token, f"Test Rice {unique_suffix}", "Test Store", 89.99)
         report_id = None
         if report["success"]:
             report_id = report["data"]["report"]["report_id"]
@@ -246,8 +248,8 @@ async def main():
         else:
             log_test("Create test price report", False, report["error"])
             
-        # Create a special
-        special = await client.create_special(client.admin_token, "Test Store", "Test Special Deal")
+        # Create a special with unique data
+        special = await client.create_special(client.admin_token, "Test Store", f"Test Special Deal {unique_suffix}")
         special_id = None
         if special["success"]:
             special_id = special["data"]["special"]["special_id"]
@@ -376,7 +378,128 @@ async def main():
         else:
             log_test("Admin create banner", False, f"Failed: {create_banner}")
             
-        # Step 10: Test authentication on all admin endpoints
+        # Step 10: Test Smart Split API
+        print("\n🧠 Testing Smart Split API...")
+        
+        # Test data from review request
+        smart_split_data = {
+            "items": [
+                {"name": "Rice", "category": "Grains & Rice", "quantity": 2},
+                {"name": "Cooking Oil", "category": "Cooking Oil", "quantity": 1},
+                {"name": "Shampoo", "category": "Toiletries", "quantity": 1, "tags": ["toiletry"]},
+                {"name": "Chicken", "category": "Meat & Poultry", "quantity": 2},
+                {"name": "Milk", "category": "Dairy", "quantity": 3}
+            ],
+            "region": "East-West Corridor",
+            "is_pricesmart_member": True,
+            "prefer_single_store": False
+        }
+        
+        smart_split = await client.make_api_call("POST", "/smart-split", client.admin_token, smart_split_data)
+        if smart_split["success"] and "splits" in smart_split["data"]:
+            splits = smart_split["data"]["splits"]
+            if splits and isinstance(splits, list) and len(splits) > 0:
+                # Check if splits have required structure
+                first_split = splits[0]
+                required_split_fields = ["store", "items", "item_count"]
+                if all(field in first_split for field in required_split_fields):
+                    log_test("Smart Split API", True)
+                else:
+                    log_test("Smart Split API", False, f"Missing required fields in splits: {first_split}")
+            else:
+                log_test("Smart Split API", False, f"No splits returned or invalid format: {smart_split['data']}")
+        else:
+            log_test("Smart Split API", False, f"Failed: {smart_split}")
+            
+        # Test Smart Split without authentication
+        smart_split_no_auth = await client.make_api_call("POST", "/smart-split", None, smart_split_data)
+        if smart_split_no_auth["status"] == 401:
+            log_test("Smart Split API auth required", True)
+        else:
+            log_test("Smart Split API auth required", False, f"Expected 401, got {smart_split_no_auth['status']}")
+            
+        # Step 11: Test Traffic Status API
+        print("\n🚦 Testing Traffic Status API...")
+        
+        traffic_status = await client.make_api_call("GET", "/traffic-status", client.admin_token)
+        if traffic_status["success"]:
+            traffic_data = traffic_status["data"]
+            expected_fields = ["region", "is_peak_hours", "current_delay_mins"]
+            if all(field in traffic_data for field in expected_fields):
+                log_test("Traffic Status API", True)
+            else:
+                log_test("Traffic Status API", False, f"Missing fields in traffic data: {traffic_data}")
+        else:
+            log_test("Traffic Status API", False, f"Failed: {traffic_status}")
+            
+        # Test Traffic Status without authentication
+        traffic_no_auth = await client.make_api_call("GET", "/traffic-status")
+        if traffic_no_auth["status"] == 401:
+            log_test("Traffic Status API auth required", True)
+        else:
+            log_test("Traffic Status API auth required", False, f"Expected 401, got {traffic_no_auth['status']}")
+            
+        # Step 12: Test Admin Products API (CRUD)
+        print("\n📦 Testing Admin Products API...")
+        
+        # GET /admin/products - List all products
+        products_list = await client.make_api_call("GET", "/admin/products", client.admin_token)
+        if products_list["success"] and isinstance(products_list["data"], list):
+            log_test("Admin Products - List", True)
+        else:
+            log_test("Admin Products - List", False, f"Failed: {products_list}")
+            
+        # POST /admin/products - Create new product
+        new_product_data = {
+            "name": "Starlite Rice",
+            "category": "Grains & Rice",
+            "brand": "Starlite",
+            "unit_type": "kg",
+            "tags": ["staples"]
+        }
+        
+        create_product = await client.make_api_call("POST", "/admin/products", client.admin_token, new_product_data)
+        product_id = None
+        if create_product["success"] and "product_id" in create_product["data"]:
+            product_id = create_product["data"]["product_id"]
+            log_test("Admin Products - Create", True)
+        else:
+            log_test("Admin Products - Create", False, f"Failed: {create_product}")
+            
+        # PUT /admin/products/{product_id} - Update product
+        if product_id:
+            update_data = {"category": "Rice & Grains"}
+            update_product = await client.make_api_call("PUT", f"/admin/products/{product_id}", 
+                                                      client.admin_token, update_data)
+            if update_product["success"]:
+                log_test("Admin Products - Update", True)
+            else:
+                log_test("Admin Products - Update", False, f"Failed: {update_product}")
+                
+            # DELETE /admin/products/{product_id} - Delete product
+            delete_product = await client.make_api_call("DELETE", f"/admin/products/{product_id}", client.admin_token)
+            if delete_product["success"]:
+                log_test("Admin Products - Delete", True)
+            else:
+                log_test("Admin Products - Delete", False, f"Failed: {delete_product}")
+        
+        # Test admin authentication enforcement on Products API
+        if client.regular_token:
+            # Test non-admin access to admin products endpoints
+            regular_products = await client.make_api_call("GET", "/admin/products", client.regular_token)
+            if regular_products["status"] == 403:
+                log_test("Admin Products API access control", True)
+            else:
+                log_test("Admin Products API access control", False, f"Expected 403, got {regular_products['status']}")
+                
+            # Test creating product as non-admin
+            regular_create = await client.make_api_call("POST", "/admin/products", client.regular_token, new_product_data)
+            if regular_create["status"] == 403:
+                log_test("Admin Products Create - non-admin blocked", True)
+            else:
+                log_test("Admin Products Create - non-admin blocked", False, f"Expected 403, got {regular_create['status']}")
+                
+        # Step 13: Test authentication on all admin endpoints
         print("\n🔒 Testing authentication on admin endpoints...")
         
         # Test without token

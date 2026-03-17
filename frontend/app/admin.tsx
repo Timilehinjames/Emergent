@@ -12,7 +12,12 @@ import { Spacing, Radius, TT_REGIONS } from '../src/constants/theme';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
-type TabType = 'overview' | 'users' | 'flagged' | 'stores' | 'banners';
+type TabType = 'overview' | 'users' | 'flagged' | 'stores' | 'banners' | 'products';
+
+const PRODUCT_CATEGORIES = [
+  'Grains & Rice', 'Cooking Oil', 'Baking', 'Meat & Poultry', 'Dairy',
+  'Toiletries', 'Personal Care', 'Cleaning', 'Beverages', 'Snacks', 'General'
+];
 
 export default function AdminPanel() {
   const { token } = useAuth();
@@ -29,11 +34,16 @@ export default function AdminPanel() {
   const [flagged, setFlagged] = useState<{ reports: any[]; specials: any[] }>({ reports: [], specials: [] });
   const [stores, setStores] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [userSearch, setUserSearch] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('');
 
   // Modal states
   const [showBannerModal, setShowBannerModal] = useState(false);
   const [editBanner, setEditBanner] = useState<any>(null);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editProduct, setEditProduct] = useState<any>(null);
 
   const headers = useCallback((): Record<string, string> => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -79,6 +89,12 @@ export default function AdminPanel() {
       } else if (activeTab === 'banners') {
         const resp = await fetch(`${BACKEND_URL}/api/admin/banners`, { headers: headers() });
         if (resp.ok) setBanners(await resp.json());
+      } else if (activeTab === 'products') {
+        const queryParams = new URLSearchParams();
+        if (productSearch) queryParams.append('search', productSearch);
+        if (productCategoryFilter) queryParams.append('category', productCategoryFilter);
+        const resp = await fetch(`${BACKEND_URL}/api/admin/products?${queryParams}`, { headers: headers() });
+        if (resp.ok) setProducts(await resp.json());
       }
     } catch {} finally {
       setLoading(false);
@@ -95,7 +111,7 @@ export default function AdminPanel() {
       setLoading(true);
       fetchData();
     }
-  }, [activeTab, isAdmin, userSearch]);
+  }, [activeTab, isAdmin, userSearch, productSearch, productCategoryFilter]);
 
   const onRefresh = () => { setRefreshing(true); fetchData(); };
 
@@ -190,6 +206,39 @@ export default function AdminPanel() {
     ]);
   };
 
+  // Product Management
+  const saveProduct = async () => {
+    if (!editProduct?.name || !editProduct?.category) {
+      Alert.alert('Name and category required');
+      return;
+    }
+    try {
+      const method = editProduct.product_id ? 'PUT' : 'POST';
+      const url = editProduct.product_id
+        ? `${BACKEND_URL}/api/admin/products/${editProduct.product_id}`
+        : `${BACKEND_URL}/api/admin/products`;
+      const resp = await fetch(url, { method, headers: headers(), body: JSON.stringify(editProduct) });
+      if (resp.ok) {
+        Alert.alert('Saved');
+        setShowProductModal(false);
+        setEditProduct(null);
+        fetchData();
+      }
+    } catch { Alert.alert('Error'); }
+  };
+
+  const deleteProduct = async (productId: string) => {
+    Alert.alert('Delete Product', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          const resp = await fetch(`${BACKEND_URL}/api/admin/products/${productId}`, { method: 'DELETE', headers: headers() });
+          if (resp.ok) { Alert.alert('Deleted'); fetchData(); }
+        } catch { Alert.alert('Error'); }
+      }}
+    ]);
+  };
+
   const s = createStyles(colors);
 
   if (!isAdmin) {
@@ -213,7 +262,7 @@ export default function AdminPanel() {
 
       {/* Tabs */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tabBar}>
-        {(['overview', 'users', 'flagged', 'stores', 'banners'] as TabType[]).map(tab => (
+        {(['overview', 'users', 'flagged', 'stores', 'banners', 'products'] as TabType[]).map(tab => (
           <TouchableOpacity
             key={tab}
             testID={`admin-tab-${tab}`}
@@ -221,7 +270,7 @@ export default function AdminPanel() {
             onPress={() => setActiveTab(tab)}
           >
             <Ionicons
-              name={tab === 'overview' ? 'stats-chart' : tab === 'users' ? 'people' : tab === 'flagged' ? 'flag' : tab === 'stores' ? 'storefront' : 'megaphone'}
+              name={tab === 'overview' ? 'stats-chart' : tab === 'users' ? 'people' : tab === 'flagged' ? 'flag' : tab === 'stores' ? 'storefront' : tab === 'products' ? 'cube' : 'megaphone'}
               size={18}
               color={activeTab === tab ? colors.primaryForeground : colors.textSecondary}
             />
@@ -460,6 +509,87 @@ export default function AdminPanel() {
                 {banners.length === 0 && <Text style={s.emptyText}>No banners</Text>}
               </>
             )}
+
+            {/* PRODUCTS TAB */}
+            {activeTab === 'products' && (
+              <>
+                <View style={s.sectionHeader}>
+                  <Text style={s.sectionTitle}>Product Categories</Text>
+                  <TouchableOpacity
+                    testID="add-product-btn"
+                    style={s.addBtn}
+                    onPress={() => { setEditProduct({ name: '', category: 'General', unit_type: 'each', brand: '', tags: [] }); setShowProductModal(true); }}
+                  >
+                    <Ionicons name="add" size={20} color={colors.primaryForeground} />
+                  </TouchableOpacity>
+                </View>
+                
+                <TextInput
+                  testID="admin-product-search"
+                  style={s.searchInput}
+                  placeholder="Search products..."
+                  placeholderTextColor={colors.textSecondary}
+                  value={productSearch}
+                  onChangeText={setProductSearch}
+                />
+                
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.categoryFilter}>
+                  <TouchableOpacity
+                    style={[s.categoryChip, !productCategoryFilter && { backgroundColor: colors.primary }]}
+                    onPress={() => setProductCategoryFilter('')}
+                  >
+                    <Text style={[s.categoryChipText, !productCategoryFilter && { color: colors.primaryForeground }]}>All</Text>
+                  </TouchableOpacity>
+                  {PRODUCT_CATEGORIES.map(cat => (
+                    <TouchableOpacity
+                      key={cat}
+                      style={[s.categoryChip, productCategoryFilter === cat && { backgroundColor: colors.primary }]}
+                      onPress={() => setProductCategoryFilter(productCategoryFilter === cat ? '' : cat)}
+                    >
+                      <Text style={[s.categoryChipText, productCategoryFilter === cat && { color: colors.primaryForeground }]}>{cat}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {products.map((product, i) => (
+                  <View key={product.product_id} style={s.productCard} testID={`admin-product-${i}`}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.productName}>{product.name}</Text>
+                      <View style={s.productMeta}>
+                        <View style={[s.categoryBadge, { backgroundColor: colors.primary + '15' }]}>
+                          <Text style={[s.categoryBadgeText, { color: colors.primary }]}>{product.category}</Text>
+                        </View>
+                        {product.brand && <Text style={s.productBrand}>{product.brand}</Text>}
+                      </View>
+                      {product.tags?.length > 0 && (
+                        <View style={s.tagsRow}>
+                          {product.tags.map((tag: string, j: number) => (
+                            <View key={j} style={s.tagBadge}>
+                              <Text style={s.tagText}>{tag}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                    <View style={s.productActions}>
+                      <TouchableOpacity
+                        style={[s.actionBtn, { backgroundColor: colors.primary + '20' }]}
+                        onPress={() => { setEditProduct(product); setShowProductModal(true); }}
+                      >
+                        <Ionicons name="pencil" size={18} color={colors.primary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[s.actionBtn, { backgroundColor: colors.error + '20' }]}
+                        onPress={() => deleteProduct(product.product_id)}
+                      >
+                        <Ionicons name="trash" size={18} color={colors.error} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+                {products.length === 0 && <Text style={s.emptyText}>No products found. Add products to categorize.</Text>}
+              </>
+            )}
           </>
         )}
       </ScrollView>
@@ -543,6 +673,73 @@ export default function AdminPanel() {
               </TouchableOpacity>
               <TouchableOpacity testID="save-banner-btn" style={s.saveBtn} onPress={saveBanner}>
                 <Text style={s.saveBtnText}>Save Banner</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Product Edit Modal */}
+      <Modal visible={showProductModal} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>{editProduct?.product_id ? 'Edit Product' : 'New Product'}</Text>
+              <TouchableOpacity onPress={() => { setShowProductModal(false); setEditProduct(null); }}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              <Text style={s.inputLabel}>Product Name</Text>
+              <TextInput
+                testID="product-name-input"
+                style={s.input}
+                value={editProduct?.name || ''}
+                onChangeText={t => setEditProduct((p: any) => ({ ...p, name: t }))}
+                placeholder="e.g., Rice, Cooking Oil"
+                placeholderTextColor={colors.textSecondary}
+              />
+              <Text style={s.inputLabel}>Category</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.categoryPicker}>
+                {PRODUCT_CATEGORIES.map(cat => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[s.categoryPickerItem, editProduct?.category === cat && { backgroundColor: colors.primary }]}
+                    onPress={() => setEditProduct((p: any) => ({ ...p, category: cat }))}
+                  >
+                    <Text style={[s.categoryPickerText, editProduct?.category === cat && { color: colors.primaryForeground }]}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <Text style={s.inputLabel}>Brand (optional)</Text>
+              <TextInput
+                testID="product-brand-input"
+                style={s.input}
+                value={editProduct?.brand || ''}
+                onChangeText={t => setEditProduct((p: any) => ({ ...p, brand: t }))}
+                placeholder="e.g., Starlite, Chief"
+                placeholderTextColor={colors.textSecondary}
+              />
+              <Text style={s.inputLabel}>Unit Type</Text>
+              <TextInput
+                testID="product-unit-input"
+                style={s.input}
+                value={editProduct?.unit_type || ''}
+                onChangeText={t => setEditProduct((p: any) => ({ ...p, unit_type: t }))}
+                placeholder="e.g., each, kg, L"
+                placeholderTextColor={colors.textSecondary}
+              />
+              <Text style={s.inputLabel}>Tags (comma-separated)</Text>
+              <TextInput
+                testID="product-tags-input"
+                style={s.input}
+                value={(editProduct?.tags || []).join(', ')}
+                onChangeText={t => setEditProduct((p: any) => ({ ...p, tags: t.split(',').map((s: string) => s.trim()).filter(Boolean) }))}
+                placeholder="e.g., bulk, toiletry, pennywise-special"
+                placeholderTextColor={colors.textSecondary}
+              />
+              <TouchableOpacity testID="save-product-btn" style={s.saveBtn} onPress={saveProduct}>
+                <Text style={s.saveBtnText}>Save Product</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -676,4 +873,32 @@ const createStyles = (colors: any) => StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginTop: Spacing.l,
   },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: colors.primaryForeground },
+  // Products tab styles
+  categoryFilter: { marginBottom: Spacing.m },
+  categoryChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.full,
+    backgroundColor: colors.surface, marginRight: Spacing.xs,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  categoryChipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  productCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
+    backgroundColor: colors.surface, borderRadius: Radius.l, padding: Spacing.m, marginBottom: Spacing.s,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+  },
+  productName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  productMeta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.s, marginTop: 4 },
+  categoryBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: Radius.s },
+  categoryBadgeText: { fontSize: 11, fontWeight: '700' },
+  productBrand: { fontSize: 12, color: colors.textSecondary },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
+  tagBadge: { backgroundColor: colors.accent + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: Radius.s },
+  tagText: { fontSize: 10, fontWeight: '600', color: colors.accent },
+  productActions: { flexDirection: 'row', gap: Spacing.xs },
+  categoryPicker: { marginVertical: Spacing.s },
+  categoryPickerItem: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: Radius.m,
+    backgroundColor: colors.inputBg, marginRight: Spacing.xs,
+  },
+  categoryPickerText: { fontSize: 13, fontWeight: '600', color: colors.text },
 });

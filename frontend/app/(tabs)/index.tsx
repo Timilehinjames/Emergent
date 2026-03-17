@@ -82,9 +82,15 @@ export default function HomeScreen() {
             <Text style={s.greeting}>Hello, {user?.name?.split(' ')[0] || 'Shopper'}</Text>
             <Text style={s.subGreeting}>{user?.region}</Text>
           </View>
-          <View style={s.pointsBadge}>
-            <Ionicons name="star" size={16} color={colors.accent} />
-            <Text style={s.pointsText}>{user?.points || 0} pts</Text>
+          <View style={s.statsRow}>
+            <View style={s.statBadge}>
+              <Ionicons name="star" size={14} color={colors.accent} />
+              <Text style={s.statText}>{user?.points || 0} pts</Text>
+            </View>
+            <View style={[s.statBadge, { backgroundColor: colors.secondary + '15' }]}>
+              <Ionicons name="document-text" size={14} color={colors.secondary} />
+              <Text style={[s.statText, { color: colors.secondary }]}>{savings?.total_reports || 0} reports</Text>
+            </View>
           </View>
         </View>
 
@@ -152,24 +158,6 @@ export default function HomeScreen() {
           </ScrollView>
         )}
 
-        {/* Savings at a Glance */}
-        <View style={s.savingsRow}>
-          <View style={[s.savingsCard, { backgroundColor: colors.primary }]}>
-            <Ionicons name="wallet" size={22} color={colors.primaryForeground} />
-            <Text style={[s.savingsValue, { color: colors.primaryForeground }]}>
-              ${savings?.this_month_savings?.toFixed(0) || '0'}
-            </Text>
-            <Text style={[s.savingsLabel, { color: colors.primaryForeground + 'BB' }]}>Saved this month</Text>
-          </View>
-          <View style={[s.savingsCard, { backgroundColor: colors.secondary }]}>
-            <Ionicons name="document-text" size={22} color={colors.secondaryForeground} />
-            <Text style={[s.savingsValue, { color: colors.secondaryForeground }]}>
-              {savings?.total_reports || 0}
-            </Text>
-            <Text style={[s.savingsLabel, { color: colors.secondaryForeground + 'BB' }]}>Price reports</Text>
-          </View>
-        </View>
-
         {/* Quick Actions — just the essentials */}
         <Text style={s.sectionTitle}>Quick Actions</Text>
         <View style={s.actionsGrid}>
@@ -233,13 +221,13 @@ const createStyles = (colors: any) => StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.l },
   greeting: { fontSize: 26, fontWeight: '800', color: colors.text, letterSpacing: -0.5 },
   subGreeting: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
-  pointsBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: colors.surface, paddingHorizontal: 14, paddingVertical: 8,
+  statsRow: { flexDirection: 'row', gap: 8 },
+  statBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: colors.accent + '15', paddingHorizontal: 10, paddingVertical: 6,
     borderRadius: Radius.full,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
-  pointsText: { fontSize: 15, fontWeight: '700', color: colors.accent },
+  statText: { fontSize: 12, fontWeight: '700', color: colors.accent },
 
   // CTA
   ctaCard: {
@@ -272,15 +260,6 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   savedListName: { fontSize: 15, fontWeight: '600', color: colors.text },
   savedListCount: { fontSize: 12, color: colors.textSecondary },
-
-  // Savings
-  savingsRow: { flexDirection: 'row', gap: Spacing.m, marginBottom: Spacing.l },
-  savingsCard: {
-    flex: 1, borderRadius: Radius.l, padding: Spacing.m, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3,
-  },
-  savingsValue: { fontSize: 26, fontWeight: '800', marginTop: 4 },
-  savingsLabel: { fontSize: 11, fontWeight: '600', marginTop: 2 },
 
   // Section
   sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: Spacing.m },

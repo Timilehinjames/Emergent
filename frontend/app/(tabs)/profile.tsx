@@ -12,6 +12,8 @@ import { Spacing, Radius, Shadows, TT_REGIONS } from '../../src/constants/theme'
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
+const ADMIN_EMAILS = ["admin@trinisaver.com", "admin@test.com"];
+
 export default function ProfileScreen() {
   const { user, token, logout, refreshUser } = useAuth();
   const { colors, mode, toggleTheme } = useTheme();
@@ -21,6 +23,7 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isPriceSmart, setIsPriceSmart] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -32,6 +35,9 @@ export default function ProfileScreen() {
         setProfile(data);
         setIsPriceSmart(data.is_pricesmart_member || false);
         setSelectedRegion(data.region || 'North');
+        // Check if admin
+        const adminCheck = ADMIN_EMAILS.includes(data.email) || data.is_admin;
+        setIsAdmin(adminCheck);
       }
     } catch {} finally {
       setLoading(false);
@@ -176,6 +182,26 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Admin Panel - Only visible to admins */}
+        {isAdmin && (
+          <TouchableOpacity
+            testID="admin-panel-btn"
+            style={s.adminCard}
+            onPress={() => router.push('/admin')}
+          >
+            <View style={s.settingRow}>
+              <View style={[s.settingIcon, { backgroundColor: '#9C27B0' + '18' }]}>
+                <Ionicons name="shield-checkmark" size={20} color="#9C27B0" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.settingLabel}>Admin Panel</Text>
+                <Text style={s.settingDesc}>Manage users, stores & content</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* Points & Rewards Info */}
         <View style={s.settingCard}>
           <Text style={s.settingCardTitle}>Points & Rewards</Text>
@@ -233,6 +259,11 @@ const createStyles = (colors: any) => StyleSheet.create({
   settingCard: {
     backgroundColor: colors.surface, borderRadius: Radius.xl,
     padding: Spacing.l, marginBottom: Spacing.m, ...Shadows.card,
+  },
+  adminCard: {
+    backgroundColor: colors.surface, borderRadius: Radius.xl,
+    padding: Spacing.l, marginBottom: Spacing.m, ...Shadows.card,
+    borderWidth: 1.5, borderColor: '#9C27B0' + '30',
   },
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.m },
   settingIcon: {

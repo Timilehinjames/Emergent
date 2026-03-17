@@ -28,6 +28,19 @@ export default function SpecialsScreen() {
   const [flyerStore, setFlyerStore] = useState('');
   const [expandedSpecial, setExpandedSpecial] = useState<string | null>(null);
 
+  const flagSpecial = async (specialId: string) => {
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/flag/special/${specialId}`, { method: 'POST', headers: headers() });
+      if (resp.ok) {
+        const data = await resp.json();
+        Alert.alert('Flagged', data.message);
+        fetchSpecials();
+      } else if (resp.status === 409) {
+        Alert.alert('Already Flagged', 'You already flagged this as outdated');
+      }
+    } catch { Alert.alert('Error', 'Failed to flag'); }
+  };
+
   const headers = useCallback((): Record<string, string> => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) h['Authorization'] = `Bearer ${token}`;
@@ -208,7 +221,21 @@ export default function SpecialsScreen() {
                   )}
                   <View style={s.specialFooter}>
                     <Text style={s.specialPostedBy}>by {sp.posted_by_name}</Text>
-                    <Text style={s.specialDate}>{new Date(sp.created_at).toLocaleDateString()}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {sp.is_outdated && <Text style={s.outdatedTag}>OUTDATED</Text>}
+                      <TouchableOpacity
+                        testID={`flag-special-${i}`}
+                        onPress={() => flagSpecial(sp.special_id)}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Ionicons
+                          name={sp.is_outdated ? 'flag' : 'flag-outline'}
+                          size={16}
+                          color={sp.is_outdated ? colors.warning : colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                      <Text style={s.specialDate}>{new Date(sp.created_at).toLocaleDateString()}</Text>
+                    </View>
                   </View>
                 </TouchableOpacity>
               );
@@ -346,6 +373,10 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   specialPostedBy: { fontSize: 12, color: colors.textSecondary },
   specialDate: { fontSize: 12, color: colors.textSecondary },
+  outdatedTag: {
+    fontSize: 10, fontWeight: '700', color: colors.warning,
+    backgroundColor: colors.warning + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+  },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,

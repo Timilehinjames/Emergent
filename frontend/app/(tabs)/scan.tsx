@@ -159,7 +159,6 @@ export default function ScanScreen() {
         Alert.alert('All Reported!', `${reported} items submitted. +${totalPoints} points total!`);
       }
     } catch { Alert.alert('Error', 'Some items failed'); } finally { setSubmitting(false); }
-    } catch { Alert.alert('Error', 'Some items failed'); } finally { setSubmitting(false); }
   };
 
   const reset = () => {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, ActivityIndicator
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +44,21 @@ export default function HomeScreen() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const onRefresh = () => { setRefreshing(true); fetchData(); };
+
+  const flagItem = async (itemType: string, itemId: string) => {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await fetch(`${BACKEND_URL}/api/flag/${itemType}/${itemId}`, { method: 'POST', headers });
+      if (resp.ok) {
+        const data = await resp.json();
+        Alert.alert('Flagged', data.message);
+        fetchData();
+      } else if (resp.status === 409) {
+        Alert.alert('Already Flagged', 'You already flagged this as outdated');
+      }
+    } catch { Alert.alert('Error', 'Failed to flag'); }
+  };
 
   const s = createStyles(colors);
 
@@ -189,6 +204,17 @@ export default function HomeScreen() {
                   <Text style={s.reportStore}>{report.store_name}</Text>
                 </View>
                 <Text style={s.reportPrice}>${report.price?.toFixed(2)}</Text>
+                <TouchableOpacity
+                  testID={`flag-report-${i}`}
+                  style={s.flagBtn}
+                  onPress={() => flagItem('report', report.report_id)}
+                >
+                  <Ionicons
+                    name={report.is_outdated ? 'flag' : 'flag-outline'}
+                    size={16}
+                    color={report.is_outdated ? colors.warning : colors.textSecondary}
+                  />
+                </TouchableOpacity>
               </View>
             ))}
           </>
@@ -293,4 +319,5 @@ const createStyles = (colors: any) => StyleSheet.create({
   bannerSubtitle: { fontSize: 12, marginTop: 2 },
   bannerCta: { borderWidth: 1.5, borderRadius: Radius.m, paddingHorizontal: 12, paddingVertical: 6 },
   bannerCtaText: { fontSize: 12, fontWeight: '700' },
+  flagBtn: { padding: 8, marginLeft: 4 },
 });

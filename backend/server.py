@@ -387,6 +387,58 @@ async def get_recent_reports(limit: int = 20):
     ).sort("created_at", -1).to_list(limit)
     return reports
 
+# ============ FLAG AS OUTDATED ============
+
+FLAG_THRESHOLD = 3  # Number of flags before auto-marking as outdated
+
+# Admin emails (hardcoded for MVP - can be moved to DB later)
+ADMIN_EMAILS = ["admin@trinisaver.com", "admin@test.com"]
+
+async def require_admin(request: Request) -> dict:
+    """Check if user is admin"""
+    user = await get_current_user(request)
+    if user.get("email") not in ADMIN_EMAILS and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+@api_router.post("/flag/{item_type}/{item_id}")
+async def flag_as_outdated(item_type: str, item_id: str, request: Request):
+    user = await get_current_user(request)
+    if item_type not in ("report", "special"):
+        raise HTTPException(status_code=400, detail="item_type must be 'report' or 'special'")
+    collection = db.price_reports if item_type == "report" else db.specials
+    id_field = "report_id" if item_type == "report" else "special_id"
+    item = await collection.find_one({id_field: item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    # Check if user already flagged
+    flagged_by = item.get("flagged_by", [])
+    if user["user_id"] in flagged_by:
+        raise HTTPException(status_code=409, detail="You already flagged this as outdated")
+    flagged_by.append(user["user_id"])
+    flag_count = len(flagged_by)
+    is_outdated = flag_count >= FLAG_THRESHOLD
+    update = {
+        "$set": {
+            "flagged_by": flagged_by,
+            "flag_count": flag_count,
+            "is_outdated": is_outdated,
+        }
+    }
+    if is_outdated:
+        update["$set"]["outdated_at"] = datetime.now(timezone.utc).isoformat()
+        # Allow re-submission by clearing the dedup hash
+        update["$set"]["image_hash"] = ""
+    await collection.update_one({id_field: item_id}, update)
+    # Award 2 points for flagging
+    await db.users.update_one({"user_id": user["user_id"]}, {"$inc": {"points": 2}})
+    return {
+        "flag_count": flag_count,
+        "is_outdated": is_outdated,
+        "points_earned": 2,
+        "message": "Marked as outdated! This price can now be re-reported." if is_outdated else f"Flagged ({flag_count}/{FLAG_THRESHOLD} needed to mark outdated)"
+    }
+
 # ============ UNIT PRICE COMPARISON ============
 
 UNIT_CONVERSIONS = {
@@ -534,7 +586,7 @@ async def plan_trip(request: Request):
 
 @api_router.post("/scan/shelf-tag")
 async def scan_shelf_tag(request: Request):
-    user = await get_current_user(request)
+    _user = await get_current_user(request)  # Require auth but don't use user data
     body = await request.json()
     image_base64 = body.get("image_base64", "")
     scan_type = body.get("scan_type", "single")  # "single", "receipt", "flyer"
@@ -952,6 +1004,224 @@ async def seed_database():
         ]
         await db.banners.insert_many(banners)
         logger.info("Seeded banners")
+
+# ============ ADMIN PANEL ENDPOINTS ============
+
+@api_router.get("/admin/stats")
+async def admin_get_stats(request: Request):
+    """Get overall admin dashboard statistics"""
+    await require_admin(request)
+    total_users = await db.users.count_documents({})
+    total_reports = await db.price_reports.count_documents({})
+    total_specials = await db.specials.count_documents({})
+    total_stores = await db.stores.count_documents({})
+    flagged_reports = await db.price_reports.count_documents({"flag_count": {"$gte": 1}})
+    flagged_specials = await db.specials.count_documents({"flag_count": {"$gte": 1}})
+    outdated_reports = await db.price_reports.count_documents({"is_outdated": True})
+    outdated_specials = await db.specials.count_documents({"is_outdated": True})
+    pending_stores = await db.stores.count_documents({"status": "pending"})
+    # Recent activity (last 7 days)
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    new_users_week = await db.users.count_documents({"created_at": {"$gte": week_ago}})
+    new_reports_week = await db.price_reports.count_documents({"created_at": {"$gte": week_ago}})
+    return {
+        "total_users": total_users,
+        "total_reports": total_reports,
+        "total_specials": total_specials,
+        "total_stores": total_stores,
+        "flagged_reports": flagged_reports,
+        "flagged_specials": flagged_specials,
+        "outdated_reports": outdated_reports,
+        "outdated_specials": outdated_specials,
+        "pending_stores": pending_stores,
+        "new_users_week": new_users_week,
+        "new_reports_week": new_reports_week,
+    }
+
+@api_router.get("/admin/users")
+async def admin_get_users(request: Request, limit: int = 50, skip: int = 0, search: str = ""):
+    """Get all users for admin management"""
+    await require_admin(request)
+    query = {}
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}}
+        ]
+    users = await db.users.find(query, {"_id": 0, "password_hash": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.users.count_documents(query)
+    return {"users": users, "total": total}
+
+@api_router.put("/admin/users/{user_id}")
+async def admin_update_user(user_id: str, request: Request):
+    """Update user (ban, set admin, adjust points)"""
+    await require_admin(request)
+    body = await request.json()
+    update_fields = {}
+    if "is_banned" in body:
+        update_fields["is_banned"] = body["is_banned"]
+    if "is_admin" in body:
+        update_fields["is_admin"] = body["is_admin"]
+    if "points" in body:
+        update_fields["points"] = int(body["points"])
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.users.update_one({"user_id": user_id}, {"$set": update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User updated", "updated_fields": list(update_fields.keys())}
+
+@api_router.get("/admin/flagged")
+async def admin_get_flagged(request: Request, item_type: str = "all"):
+    """Get flagged reports and specials for review"""
+    await require_admin(request)
+    result = {"reports": [], "specials": []}
+    if item_type in ("all", "reports"):
+        reports = await db.price_reports.find(
+            {"flag_count": {"$gte": 1}},
+            {"_id": 0, "photo_base64": 0}
+        ).sort("flag_count", -1).to_list(50)
+        result["reports"] = reports
+    if item_type in ("all", "specials"):
+        specials = await db.specials.find(
+            {"flag_count": {"$gte": 1}},
+            {"_id": 0, "photo_base64": 0}
+        ).sort("flag_count", -1).to_list(50)
+        result["specials"] = specials
+    return result
+
+@api_router.delete("/admin/reports/{report_id}")
+async def admin_delete_report(report_id: str, request: Request):
+    """Delete a price report (admin only)"""
+    await require_admin(request)
+    result = await db.price_reports.delete_one({"report_id": report_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"message": "Report deleted"}
+
+@api_router.delete("/admin/specials/{special_id}")
+async def admin_delete_special(special_id: str, request: Request):
+    """Delete a special (admin only)"""
+    await require_admin(request)
+    result = await db.specials.delete_one({"special_id": special_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Special not found")
+    return {"message": "Special deleted"}
+
+@api_router.put("/admin/clear-flags/{item_type}/{item_id}")
+async def admin_clear_flags(item_type: str, item_id: str, request: Request):
+    """Clear flags from an item (admin decided it's valid)"""
+    await require_admin(request)
+    if item_type not in ("report", "special"):
+        raise HTTPException(status_code=400, detail="item_type must be 'report' or 'special'")
+    collection = db.price_reports if item_type == "report" else db.specials
+    id_field = "report_id" if item_type == "report" else "special_id"
+    result = await collection.update_one(
+        {id_field: item_id},
+        {"$set": {"flagged_by": [], "flag_count": 0, "is_outdated": False, "outdated_at": None}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"message": "Flags cleared"}
+
+@api_router.get("/admin/stores")
+async def admin_get_stores(request: Request, status: str = "all"):
+    """Get stores for admin review (including pending user-added stores)"""
+    await require_admin(request)
+    query = {}
+    if status != "all":
+        query["status"] = status
+    stores = await db.stores.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return stores
+
+@api_router.put("/admin/stores/{store_id}")
+async def admin_update_store(store_id: str, request: Request):
+    """Approve/reject/edit a store"""
+    await require_admin(request)
+    body = await request.json()
+    update_fields = {}
+    if "status" in body:
+        update_fields["status"] = body["status"]  # "approved", "rejected", "pending"
+    if "name" in body:
+        update_fields["name"] = body["name"]
+    if "region" in body:
+        update_fields["region"] = body["region"]
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.stores.update_one({"store_id": store_id}, {"$set": update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Store not found")
+    return {"message": "Store updated"}
+
+@api_router.delete("/admin/stores/{store_id}")
+async def admin_delete_store(store_id: str, request: Request):
+    """Delete a store (admin only)"""
+    await require_admin(request)
+    result = await db.stores.delete_one({"store_id": store_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Store not found")
+    return {"message": "Store deleted"}
+
+@api_router.get("/admin/banners")
+async def admin_get_banners(request: Request):
+    """Get all banners for admin management"""
+    await require_admin(request)
+    banners = await db.banners.find({}, {"_id": 0}).sort("priority", -1).to_list(50)
+    return banners
+
+@api_router.post("/admin/banners")
+async def admin_create_banner(request: Request):
+    """Create a new ad banner"""
+    await require_admin(request)
+    body = await request.json()
+    banner_id = f"ban_{uuid.uuid4().hex[:8]}"
+    banner = {
+        "banner_id": banner_id,
+        "title": body.get("title", ""),
+        "subtitle": body.get("subtitle", ""),
+        "cta_text": body.get("cta_text", "Learn More"),
+        "cta_url": body.get("cta_url", ""),
+        "bg_color": body.get("bg_color", "#0277BD"),
+        "text_color": body.get("text_color", "#FFFFFF"),
+        "active": body.get("active", True),
+        "priority": int(body.get("priority", 1)),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.banners.insert_one(banner)
+    banner.pop("_id", None)
+    return banner
+
+@api_router.put("/admin/banners/{banner_id}")
+async def admin_update_banner(banner_id: str, request: Request):
+    """Update a banner"""
+    await require_admin(request)
+    body = await request.json()
+    update_fields = {}
+    for field in ["title", "subtitle", "cta_text", "cta_url", "bg_color", "text_color", "active", "priority"]:
+        if field in body:
+            update_fields[field] = body[field]
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.banners.update_one({"banner_id": banner_id}, {"$set": update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Banner not found")
+    return {"message": "Banner updated"}
+
+@api_router.delete("/admin/banners/{banner_id}")
+async def admin_delete_banner(banner_id: str, request: Request):
+    """Delete a banner"""
+    await require_admin(request)
+    result = await db.banners.delete_one({"banner_id": banner_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Banner not found")
+    return {"message": "Banner deleted"}
+
+@api_router.get("/admin/check")
+async def admin_check(request: Request):
+    """Check if current user is admin"""
+    user = await get_current_user(request)
+    is_admin = user.get("email") in ADMIN_EMAILS or user.get("is_admin", False)
+    return {"is_admin": is_admin}
 
 @app.on_event("startup")
 async def startup():

@@ -109,6 +109,11 @@ export default function ScanScreen() {
         const data = await resp.json();
         setSubmitted(true);
         Alert.alert('Success', `Price reported! +${data.points_earned} points`);
+      } else if (resp.status === 409) {
+        const err = await resp.json().catch(() => ({}));
+        Alert.alert('Already Reported', err.detail || 'This price has already been reported');
+      } else {
+        Alert.alert('Error', 'Failed to submit report');
       }
     } catch { Alert.alert('Error', 'Failed to submit'); } finally { setSubmitting(false); }
   };
@@ -120,6 +125,7 @@ export default function ScanScreen() {
     }
     setSubmitting(true);
     let totalPoints = 0;
+    let duplicates = 0;
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -138,10 +144,21 @@ export default function ScanScreen() {
         if (resp.ok) {
           const data = await resp.json();
           totalPoints += data.points_earned;
+        } else if (resp.status === 409) {
+          duplicates++;
         }
       }
       setSubmitted(true);
-      Alert.alert('All Reported!', `${selectedItems.size} items submitted. +${totalPoints} points total!`);
+      const reported = selectedItems.size - duplicates;
+      if (duplicates > 0 && reported > 0) {
+        Alert.alert('Partially Submitted', `${reported} new item(s) reported (+${totalPoints} pts). ${duplicates} skipped as duplicates.`);
+      } else if (duplicates > 0 && reported === 0) {
+        Alert.alert('Already Reported', 'All items were already reported for this store.');
+        setSubmitted(false);
+      } else {
+        Alert.alert('All Reported!', `${reported} items submitted. +${totalPoints} points total!`);
+      }
+    } catch { Alert.alert('Error', 'Some items failed'); } finally { setSubmitting(false); }
     } catch { Alert.alert('Error', 'Some items failed'); } finally { setSubmitting(false); }
   };
 

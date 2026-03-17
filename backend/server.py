@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
 import httpx
+import hashlib
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -309,6 +310,32 @@ async def create_price_report(request: Request):
     quantity = float(body.get("quantity", 1))
     unit = body.get("unit", "each")
     photo_base64 = body.get("photo_base64", "")
+    # Dedup: check image hash if photo provided
+    image_hash = ""
+    if photo_base64 and len(photo_base64) > 50:
+        image_hash = hashlib.sha256(photo_base64[:5000].encode()).hexdigest()
+        dup_by_image = await db.price_reports.find_one({
+            "image_hash": image_hash,
+            "$or": [
+                {"reporter_user_id": user["user_id"]},
+                {"store_name": store_name}
+            ]
+        }, {"_id": 0})
+        if dup_by_image:
+            raise HTTPException(status_code=409, detail="This image has already been submitted for this store")
+    # Dedup: same user, same product, same store, same price within 24h
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    dup_by_content = await db.price_reports.find_one({
+        "product_name": {"$regex": f"^{product_name}$", "$options": "i"},
+        "store_name": store_name,
+        "price": price,
+        "$or": [
+            {"reporter_user_id": user["user_id"]},
+        ],
+        "created_at": {"$gte": cutoff}
+    }, {"_id": 0})
+    if dup_by_content:
+        raise HTTPException(status_code=409, detail="You already reported this price for this product at this store today")
     # Calculate unit price
     unit_price = price / quantity if quantity > 0 else price
     # Find or create product
@@ -339,6 +366,7 @@ async def create_price_report(request: Request):
         "reporter_name": user.get("name", "Anonymous"),
         "verified": False,
         "photo_base64": photo_base64[:100] if photo_base64 else "",
+        "image_hash": image_hash,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.price_reports.insert_one(report)
@@ -586,6 +614,31 @@ async def create_special(request: Request):
     valid_until = body.get("valid_until", "")
     photo_base64 = body.get("photo_base64", "")
     title = body.get("title", f"Sale at {store_name}")
+    # Dedup: check image hash if photo provided
+    image_hash = ""
+    if photo_base64 and len(photo_base64) > 50:
+        image_hash = hashlib.sha256(photo_base64[:5000].encode()).hexdigest()
+        dup_by_image = await db.specials.find_one({
+            "image_hash": image_hash,
+            "$or": [
+                {"posted_by_user_id": user["user_id"]},
+                {"store_name": store_name}
+            ]
+        }, {"_id": 0})
+        if dup_by_image:
+            raise HTTPException(status_code=409, detail="This flyer has already been posted for this store")
+    # Dedup: same user, same store, same title within 24h
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    dup_by_content = await db.specials.find_one({
+        "title": {"$regex": f"^{title}$", "$options": "i"},
+        "store_name": {"$regex": f"^{store_name}$", "$options": "i"} if store_name else {"$exists": True},
+        "$or": [
+            {"posted_by_user_id": user["user_id"]},
+        ],
+        "created_at": {"$gte": cutoff}
+    }, {"_id": 0})
+    if dup_by_content:
+        raise HTTPException(status_code=409, detail="You already posted a special with this title for this store today")
     special_id = f"spc_{uuid.uuid4().hex[:8]}"
     special_doc = {
         "special_id": special_id,
@@ -594,6 +647,7 @@ async def create_special(request: Request):
         "items": items,
         "valid_until": valid_until,
         "photo_base64": photo_base64[:200] if photo_base64 else "",
+        "image_hash": image_hash,
         "posted_by_user_id": user["user_id"],
         "posted_by_name": user.get("name", "Anonymous"),
         "region": user.get("region", ""),
@@ -883,8 +937,10 @@ async def seed_database():
     await db.price_reports.create_index("product_id")
     await db.price_reports.create_index("store_name")
     await db.price_reports.create_index([("created_at", -1)])
+    await db.price_reports.create_index("image_hash")
     await db.specials.create_index([("created_at", -1)])
     await db.specials.create_index("region")
+    await db.specials.create_index("image_hash")
     await db.banners.create_index("active")
     # Seed banners
     banner_count = await db.banners.count_documents({})

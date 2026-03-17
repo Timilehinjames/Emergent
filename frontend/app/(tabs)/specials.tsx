@@ -96,6 +96,11 @@ export default function SpecialsScreen() {
         Alert.alert('Posted!', `Special shared! You earned ${data.points_earned} points.`);
         resetUpload();
         fetchSpecials();
+      } else if (resp.status === 409) {
+        const err = await resp.json().catch(() => ({}));
+        Alert.alert('Already Posted', err.detail || 'This flyer has already been shared');
+      } else {
+        Alert.alert('Error', 'Failed to post');
       }
     } catch { Alert.alert('Error', 'Failed to post'); } finally { setUploading(false); }
   };

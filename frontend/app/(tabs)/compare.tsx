@@ -201,6 +201,32 @@ export default function CompareScreen() {
     setCommunityPrices([]);
   };
 
+  const voteOnPrice = async (reportId: string, voteType: 'pay_dat' | 'doh_pay_dat') => {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      const resp = await fetch(`${BACKEND_URL}/api/price-reports/${reportId}/vote`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ vote: voteType }),
+      });
+      
+      if (resp.ok) {
+        const data = await resp.json();
+        // Update the local state with new vote counts
+        setCommunityPrices(prev => prev.map(p => 
+          p.report_id === reportId 
+            ? { ...p, pay_dat_count: data.pay_dat_count, doh_pay_dat_count: data.doh_pay_dat_count, user_vote: voteType }
+            : p
+        ));
+        Alert.alert(voteType === 'pay_dat' ? '👍 Pay Dat!' : '👎 Doh Pay Dat!', data.message);
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to vote');
+    }
+  };
+
   const updateItem = (id: string, field: string, value: string) => {
     setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
@@ -726,6 +752,7 @@ export default function CompareScreen() {
                   {scanResult && (
                     <View style={s.communitySection}>
                       <Text style={s.communityTitle}>Community Prices</Text>
+                      <Text style={s.communitySubtitle}>Vote to verify prices!</Text>
                       {loadingPrices ? (
                         <ActivityIndicator color={colors.primary} style={{ marginVertical: Spacing.m }} />
                       ) : communityPrices.length > 0 ? (
@@ -734,6 +761,11 @@ export default function CompareScreen() {
                             <View style={{ flex: 1 }}>
                               <Text style={s.communityStoreName}>{report.store_name}</Text>
                               <Text style={s.communityProductName}>{report.product_name}</Text>
+                              {/* Vote counts */}
+                              <View style={s.voteCountsRow}>
+                                <Text style={s.voteCount}>👍 {report.pay_dat_count || 0}</Text>
+                                <Text style={s.voteCount}>👎 {report.doh_pay_dat_count || 0}</Text>
+                              </View>
                             </View>
                             <View style={s.communityPriceCol}>
                               <Text style={[s.communityPrice, {
@@ -747,6 +779,23 @@ export default function CompareScreen() {
                                   Save ${(scanResult.price - report.price).toFixed(2)}
                                 </Text>
                               )}
+                            </View>
+                            {/* Vote Buttons */}
+                            <View style={s.voteButtons}>
+                              <TouchableOpacity
+                                style={[s.voteBtn, s.payDatBtn, report.user_vote === 'pay_dat' && s.voteBtnActive]}
+                                onPress={() => voteOnPrice(report.report_id, 'pay_dat')}
+                              >
+                                <Text style={s.voteBtnText}>👍</Text>
+                                <Text style={s.voteBtnLabel}>Pay Dat</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[s.voteBtn, s.dohPayDatBtn, report.user_vote === 'doh_pay_dat' && s.voteBtnActive]}
+                                onPress={() => voteOnPrice(report.report_id, 'doh_pay_dat')}
+                              >
+                                <Text style={s.voteBtnText}>👎</Text>
+                                <Text style={s.voteBtnLabel}>Doh Pay Dat</Text>
+                              </TouchableOpacity>
                             </View>
                           </View>
                         ))
@@ -972,6 +1021,19 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: 4, marginTop: 2,
   },
   noCommunityPrices: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', paddingVertical: Spacing.m },
+  communitySubtitle: { fontSize: 12, color: colors.textSecondary, marginBottom: Spacing.s },
+  voteCountsRow: { flexDirection: 'row', gap: Spacing.m, marginTop: 4 },
+  voteCount: { fontSize: 11, color: colors.textSecondary },
+  voteButtons: { flexDirection: 'column', gap: 4, marginLeft: Spacing.s },
+  voteBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 8, paddingVertical: 6, borderRadius: Radius.s,
+  },
+  payDatBtn: { backgroundColor: colors.success + '15' },
+  dohPayDatBtn: { backgroundColor: colors.error + '15' },
+  voteBtnActive: { borderWidth: 2, borderColor: colors.primary },
+  voteBtnText: { fontSize: 14 },
+  voteBtnLabel: { fontSize: 10, fontWeight: '600', color: colors.text },
   retakeBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: Spacing.xs, paddingVertical: Spacing.m,

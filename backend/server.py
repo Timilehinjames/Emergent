@@ -407,7 +407,7 @@ async def search_price_reports(product: str = "", store: str = "", limit: int = 
 FLAG_THRESHOLD = 3  # Number of flags before auto-marking as outdated
 
 # Admin emails (hardcoded for MVP - can be moved to DB later)
-ADMIN_EMAILS = ["admin@trinisaver.com", "admin@test.com"]
+ADMIN_EMAILS = ["admin@dohpaydat.com", "admin@test.com"]
 
 async def require_admin(request: Request) -> dict:
     """Check if user is admin"""
@@ -415,6 +415,69 @@ async def require_admin(request: Request) -> dict:
     if user.get("email") not in ADMIN_EMAILS and not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+# ============ PRICE VERIFICATION (Pay Dat / Doh Pay Dat) ============
+
+@api_router.post("/price-reports/{report_id}/vote")
+async def vote_on_price(report_id: str, request: Request):
+    """Vote on a price report - Pay Dat (thumbs up) or Doh Pay Dat (thumbs down)"""
+    user = await get_current_user(request)
+    body = await request.json()
+    vote_type = body.get("vote")  # "pay_dat" or "doh_pay_dat"
+    
+    if vote_type not in ("pay_dat", "doh_pay_dat"):
+        raise HTTPException(status_code=400, detail="Vote must be 'pay_dat' or 'doh_pay_dat'")
+    
+    report = await db.price_reports.find_one({"report_id": report_id})
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    user_id = user["user_id"]
+    pay_dat_votes = report.get("pay_dat_votes", [])
+    doh_pay_dat_votes = report.get("doh_pay_dat_votes", [])
+    
+    # Remove any existing vote by this user
+    if user_id in pay_dat_votes:
+        pay_dat_votes.remove(user_id)
+    if user_id in doh_pay_dat_votes:
+        doh_pay_dat_votes.remove(user_id)
+    
+    # Add new vote
+    if vote_type == "pay_dat":
+        pay_dat_votes.append(user_id)
+    else:
+        doh_pay_dat_votes.append(user_id)
+    
+    await db.price_reports.update_one(
+        {"report_id": report_id},
+        {"$set": {
+            "pay_dat_votes": pay_dat_votes,
+            "doh_pay_dat_votes": doh_pay_dat_votes,
+            "pay_dat_count": len(pay_dat_votes),
+            "doh_pay_dat_count": len(doh_pay_dat_votes),
+        }}
+    )
+    
+    return {
+        "report_id": report_id,
+        "pay_dat_count": len(pay_dat_votes),
+        "doh_pay_dat_count": len(doh_pay_dat_votes),
+        "your_vote": vote_type,
+        "message": "Pay Dat! 👍" if vote_type == "pay_dat" else "Doh Pay Dat! 👎"
+    }
+
+@api_router.get("/price-reports/{report_id}/votes")
+async def get_report_votes(report_id: str):
+    """Get vote counts for a price report"""
+    report = await db.price_reports.find_one({"report_id": report_id}, {"_id": 0})
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    return {
+        "report_id": report_id,
+        "pay_dat_count": report.get("pay_dat_count", 0),
+        "doh_pay_dat_count": report.get("doh_pay_dat_count", 0),
+    }
 
 @api_router.post("/flag/{item_type}/{item_id}")
 async def flag_as_outdated(item_type: str, item_id: str, request: Request):
@@ -1491,7 +1554,7 @@ async def get_traffic_status(request: Request):
 @app.on_event("startup")
 async def startup():
     await seed_database()
-    logger.info("Dotish Prices TT API started")
+    logger.info("Doh Pay Dat API started")
 
 app.include_router(api_router)
 

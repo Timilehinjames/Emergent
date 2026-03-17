@@ -230,7 +230,7 @@ export default function ProfileScreen() {
           <Text style={s.logoutText}>Logout</Text>
         </TouchableOpacity>
 
-        <Text style={s.version}>Dotish Prices TT v1.0 - Made for T&T</Text>
+        <Text style={s.version}>Doh Pay Dat v1.0 - Made for T&T</Text>
       </ScrollView>
     </SafeAreaView>
   );

@@ -106,6 +106,33 @@ class ItemImageResponse(BaseModel):
     item_name: Optional[str]
     message: str
 
+# ============ SCAN IDENTIFY MODELS ============
+
+class ScanIdentifyRequest(BaseModel):
+    """Sent from the mobile app after the user takes/picks a photo."""
+    image_data: str  # raw base64 string (no data-URI prefix)
+    mime_type: str = "image/jpeg"
+
+class IdentifiedProduct(BaseModel):
+    name: str
+    brand: Optional[str] = None
+    size: Optional[str] = None
+    price: Optional[float] = None
+    store: Optional[str] = None
+    barcode: Optional[str] = None
+    category: Optional[str] = None
+    confidence: float = 0.0
+    raw_text: Optional[str] = None
+
+class ScanIdentifyResponse(BaseModel):
+    success: bool
+    product: Optional[IdentifiedProduct] = None
+    message: str
+
+class UpdateRegionRequest(BaseModel):
+    region: str
+    catchment_km: int = 5
+
 # ============ IMAGE HELPERS ============
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -602,6 +629,173 @@ async def get_report_image(report_id: str):
         "item_id": report_id,
         "item_name": report.get("product_name"),
         "image_url": image_url,
+    }
+
+# ============ SCAN / IDENTIFY ENDPOINT ============
+
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+@api_router.post(
+    "/scan/identify",
+    response_model=ScanIdentifyResponse,
+    summary="Identify product details from a photo (receipt, price tag, product image)",
+    tags=["Scan"],
+)
+async def scan_identify(payload: ScanIdentifyRequest, request: Request):
+    """
+    Accepts a base64-encoded image and returns structured product details.
+    Works with: Product photos, Price tags, Receipts, Promotional flyers
+    """
+    user = await get_current_user(request)
+    
+    # Validate image
+    ALLOWED = {"image/jpeg", "image/png", "image/webp"}
+    if payload.mime_type not in ALLOWED:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported mime type. Allowed: {', '.join(ALLOWED)}",
+        )
+    
+    # Strip data-URI prefix if frontend accidentally included it
+    image_data = payload.image_data
+    if image_data.startswith("data:"):
+        match = re.match(r"data:[^;]+;base64,(.+)", image_data, re.DOTALL)
+        if match:
+            image_data = match.group(1)
+    
+    try:
+        base64.b64decode(image_data, validate=True)
+    except Exception:
+        raise HTTPException(status_code=422, detail="image_data is not valid base64.")
+    
+    # Use emergentintegrations for Claude vision
+    prompt = """You are a product recognition assistant for a T&T grocery shopping app.
+
+Analyse this image carefully. It may show:
+- A grocery product (read brand, product name, size/weight from packaging)
+- A price tag or shelf label (read product name, price, unit e.g. per kg / each)
+- A supermarket receipt (extract up to 5 line items: name and price)
+- A promotional flyer (read store name, product, sale price)
+
+Respond ONLY with a valid JSON object — no preamble, no markdown fences.
+Use this exact structure:
+{
+  "name": "product name (required)",
+  "brand": "brand name or null",
+  "size": "e.g. 500g, 2L, or null",
+  "price": numeric price in TTD or null,
+  "store": "store name or null",
+  "barcode": "barcode number if visible or null",
+  "category": "one of: dairy, produce, meat, bakery, beverages, household, grains, snacks, condiments, other",
+  "confidence": 0.0 to 1.0 (how certain are you),
+  "raw_text": "all text you can read from the image"
+}
+
+If the image is unclear, return confidence below 0.4 and best-guess values."""
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"scan_{user.get('user_id', 'anon')}_{uuid.uuid4().hex[:8]}",
+            system_message="You are a product recognition AI for a Trinidad & Tobago grocery app."
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        
+        # Create image content
+        image_content = ImageContent(image_base64=image_data)
+        
+        # Send message with image
+        user_message = UserMessage(
+            text=prompt,
+            file_contents=[image_content]
+        )
+        
+        raw = await chat.send_message(user_message)
+        
+        # Strip any accidental markdown fences
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        
+        parsed = json.loads(raw)
+        
+        product = IdentifiedProduct(
+            name=parsed.get("name", "Unknown product"),
+            brand=parsed.get("brand"),
+            size=parsed.get("size"),
+            price=parsed.get("price"),
+            store=parsed.get("store"),
+            barcode=parsed.get("barcode"),
+            category=parsed.get("category", "other"),
+            confidence=float(parsed.get("confidence", 0.5)),
+            raw_text=parsed.get("raw_text"),
+        )
+        
+        return ScanIdentifyResponse(
+            success=True,
+            product=product,
+            message="Product identified successfully.",
+        )
+        
+    except json.JSONDecodeError as e:
+        return ScanIdentifyResponse(
+            success=False,
+            product=IdentifiedProduct(
+                name="Could not parse",
+                confidence=0.0,
+                raw_text=raw if 'raw' in dir() else None,
+            ),
+            message=f"AI response was not valid JSON: {str(e)}",
+        )
+    except Exception as e:
+        logger.error(f"Scan identify error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI scan failed: {str(e)}")
+
+# ============ PROFILE REGION ENDPOINT ============
+
+VALID_TT_REGIONS = {
+    "port_of_spain", "san_fernando", "chaguanas", "arima",
+    "point_fortin", "diego_martin", "siparia", "tunapuna_piarco",
+    "san_juan_laventille", "princes_town", "couva_tabaquite_talparo",
+    "penal_debe", "sangre_grande", "rio_claro_mayaro", "tobago",
+}
+
+@api_router.put(
+    "/profile/region",
+    summary="Update user's region and catchment radius",
+    tags=["Profile"],
+)
+async def update_region(payload: UpdateRegionRequest, request: Request):
+    """
+    Saves the user's selected T&T region and their catchment km to MongoDB.
+    Frontend uses this to filter nearby price reports.
+    """
+    user = await get_current_user(request)
+    
+    if payload.region not in VALID_TT_REGIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid region '{payload.region}'.",
+        )
+    
+    if not (1 <= payload.catchment_km <= 50):
+        raise HTTPException(
+            status_code=422,
+            detail="catchment_km must be between 1 and 50.",
+        )
+    
+    user_id = user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User ID not found in token.")
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"region": payload.region, "catchment_km": payload.catchment_km}},
+    )
+    
+    return {
+        "success": True,
+        "region": payload.region,
+        "catchment_km": payload.catchment_km,
+        "message": "Region updated successfully.",
     }
 
 # ============ FLAG AS OUTDATED ============

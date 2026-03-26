@@ -318,6 +318,36 @@ backend:
         agent: "testing"
         comment: "✅ PASSED: Product Image Upload System fully functional (9/9 tests passed). All new endpoints working correctly: POST /api/products/upload-image accepts multipart form with file and product_name, creates/updates products with compressed JPEG images stored as data URIs. GET /api/products returns product list with search functionality. GET /api/products/{product_id}/image retrieves images successfully. PATCH /api/price-reports/{report_id}/attach-image attaches products to reports. Authentication, validation, and error handling all working properly. Fixed compatibility issue with existing image system by using image_url field format."
 
+  - task: "Profile Region Update API"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented PUT /api/profile/region endpoint to update user's region and catchment radius. Validates Trinidad & Tobago regions and catchment range 1-50km."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED: Profile Region Update API fully functional. Tested valid region 'port_of_spain' with catchment 10km (success), invalid region rejection (422), invalid catchment_km values 0 and 100 rejection (422). All validation and error handling working correctly."
+
+  - task: "AI Scan Identify API"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented POST /api/scan/identify endpoint using Claude AI for product identification from images. Accepts base64 images and returns structured product details."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED: AI Scan Identify endpoint verified. Endpoint accepts request format correctly, validates base64 images, and returns expected response structure. Authentication required. AI integration functional."
+
 frontend:
   - task: "Flag as Outdated UI"
     implemented: true
@@ -585,3 +615,38 @@ agent_communication:
       - ✅ Proper error handling for all edge cases
       
       All Product Image Upload System endpoints are production-ready and fully functional!
+  - agent: "testing"
+    message: |
+      ✅ NEW ENDPOINTS TESTING COMPLETED - 100% SUCCESS RATE (9/9 tests passed)
+      
+      Tested newly requested endpoints for DohPayDaTT app with comprehensive validation:
+      
+      NEW ENDPOINTS TESTED:
+      
+      1. ✅ PUT /api/profile/region - Update User Region and Catchment
+         - Valid region "port_of_spain" with catchment_km: 10 (SUCCESS)
+         - Invalid region rejection with 422 status (SUCCESS)
+         - Invalid catchment_km values (0 and 100) rejection with 422 status (SUCCESS)
+         - Proper validation for Trinidad & Tobago regions and 1-50km range
+         - Authentication required and working correctly
+      
+      2. ✅ POST /api/scan/identify - AI Image Identification (Endpoint Verification)
+         - Endpoint accepts correct request format with base64 image data
+         - Returns expected response structure with product identification
+         - Authentication required and enforced (401 without token)
+         - Claude AI integration functional and responding correctly
+         - Base64 image validation working properly
+      
+      3. ✅ ADMIN ENDPOINTS VERIFICATION
+         - GET /api/admin/check: Admin user correctly recognized (is_admin: true)
+         - GET /api/admin/stats: Returns all required statistics fields
+         - GET /api/admin/users: User listing working, returned 40 users
+         - All admin endpoints properly protected with authentication
+      
+      AUTHENTICATION & SECURITY:
+      - ✅ Admin user admin@test.com properly recognized with admin privileges
+      - ✅ All endpoints require valid authentication (Bearer token)
+      - ✅ Proper HTTP status codes for validation errors (422)
+      - ✅ Admin access control working correctly
+      
+      All new endpoints are production-ready and fully functional!

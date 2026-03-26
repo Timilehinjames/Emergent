@@ -42,7 +42,7 @@ const C = {
   error:        '#EF4444',
 };
 
-const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://localhost:8001';
 
 interface IdentifiedProduct {
   name: string;

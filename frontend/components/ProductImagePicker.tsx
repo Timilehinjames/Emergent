@@ -1,220 +1,371 @@
 /**
- * frontend/components/ProductImagePicker.tsx
- *
- * Reusable component that lets the user take a photo or choose from gallery.
- * Uses expo-image-picker (already part of Expo SDK 54).
- *
- * Usage:
- *   <ProductImagePicker onImageSelected={(base64) => setImageData(base64)} />
+ * ProductImagePicker.tsx
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Modal component for picking product images and entering product details.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
   View,
   Text,
+  Modal,
   TouchableOpacity,
+  TextInput,
   Image,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   ActivityIndicator,
   Alert,
-  StyleSheet,
-} from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import { Ionicons } from '@expo/vector-icons';
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useProductImage } from "../hooks/useProductImage";
 
 interface ProductImagePickerProps {
-  onImageSelected: (base64: string | null) => void;
-  existingImageUrl?: string | null;
+  visible: boolean;
+  onClose: () => void;
+  onUploaded?: (product: any) => void;
+  initialProductName?: string;
 }
 
-export default function ProductImagePicker({
-  onImageSelected,
-  existingImageUrl,
+export function ProductImagePicker({
+  visible,
+  onClose,
+  onUploaded,
+  initialProductName = "",
 }: ProductImagePickerProps) {
+  const { pickImage, uploadImage, uploading, error } = useProductImage();
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [productName, setProductName] = useState(initialProductName);
+  const [done, setDone] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const requestPermissions = async (): Promise<boolean> => {
-    const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
-    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (cameraStatus !== 'granted' || libraryStatus !== 'granted') {
-      Alert.alert(
-        'Permission Required',
-        'Camera and photo library access are needed to attach product photos.',
-        [{ text: 'OK' }]
-      );
-      return false;
+  const handlePick = async (source: "camera" | "gallery") => {
+    setLocalError(null);
+    const uri = await pickImage(source);
+    if (uri) {
+      setImageUri(uri);
     }
-    return true;
   };
 
-  const pickFromCamera = async () => {
-    const ok = await requestPermissions();
-    if (!ok) return;
+  const handleUpload = async () => {
+    if (!imageUri) {
+      Alert.alert("No Image", "Please select or take a photo first.");
+      return;
+    }
+    if (!productName.trim()) {
+      Alert.alert("Missing Name", "Please enter a product name.");
+      return;
+    }
 
-    setLoading(true);
+    setLocalError(null);
     try {
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,           // compress for upload
-        base64: true,           // we need base64 for API upload
-        allowsEditing: true,
-        aspect: [4, 3],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setImageUri(asset.uri);
-        // Prefix with data URI so backend can detect mime type
-        const base64 = `data:image/jpeg;base64,${asset.base64}`;
-        onImageSelected(base64);
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Could not open camera.');
-    } finally {
-      setLoading(false);
+      const result = await uploadImage(imageUri, productName.trim());
+      setDone(true);
+      onUploaded?.(result.product);
+    } catch (err: any) {
+      setLocalError(err.message || "Upload failed");
     }
   };
 
-  const pickFromGallery = async () => {
-    const ok = await requestPermissions();
-    if (!ok) return;
-
-    setLoading(true);
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,
-        base64: true,
-        allowsEditing: true,
-        aspect: [4, 3],
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setImageUri(asset.uri);
-        const mimeType = asset.mimeType ?? 'image/jpeg';
-        const base64 = `data:${mimeType};base64,${asset.base64}`;
-        onImageSelected(base64);
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Could not open photo library.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const removeImage = () => {
+  const handleClose = () => {
+    // Reset state
     setImageUri(null);
-    onImageSelected(null);
+    setProductName(initialProductName);
+    setDone(false);
+    setLocalError(null);
+    onClose();
   };
-
-  const displayUri = imageUri ?? existingImageUrl;
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>Product Photo (optional)</Text>
-
-      {displayUri ? (
-        <View style={styles.previewContainer}>
-          <Image source={{ uri: displayUri }} style={styles.preview} resizeMode="cover" />
-          <TouchableOpacity style={styles.removeBtn} onPress={removeImage} testID="remove-image-btn">
-            <Ionicons name="close-circle" size={26} color="#EF4444" />
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={handleClose}
+    >
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
+            <Ionicons name="close" size={28} color="#333" />
           </TouchableOpacity>
+          <Text style={styles.title}>Add Product Photo</Text>
+          <View style={{ width: 44 }} />
         </View>
-      ) : (
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={styles.pickerBtn}
-            onPress={pickFromCamera}
-            testID="camera-btn"
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <>
-                <Ionicons name="camera-outline" size={22} color="#FFFFFF" />
-                <Text style={styles.pickerBtnText}>Take Photo</Text>
-              </>
-            )}
-          </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.pickerBtn, styles.galleryBtn]}
-            onPress={pickFromGallery}
-            testID="gallery-btn"
-            disabled={loading}
-          >
-            <Ionicons name="images-outline" size={22} color="#0277BD" />
-            <Text style={[styles.pickerBtnText, styles.galleryBtnText]}>Choose Photo</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {done ? (
+            // Success State
+            <View style={styles.successContainer}>
+              <View style={styles.successIcon}>
+                <Ionicons name="checkmark-circle" size={80} color="#22c55e" />
+              </View>
+              <Text style={styles.successTitle}>Photo Saved!</Text>
+              <Text style={styles.successText}>
+                Your product photo has been uploaded successfully.
+              </Text>
+              <TouchableOpacity style={styles.doneBtn} onPress={handleClose}>
+                <Text style={styles.doneBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {/* Image Preview / Selection */}
+              {imageUri ? (
+                <View style={styles.imagePreview}>
+                  <Image source={{ uri: imageUri }} style={styles.previewImage} />
+                  <TouchableOpacity
+                    style={styles.changeBtn}
+                    onPress={() => setImageUri(null)}
+                  >
+                    <Ionicons name="refresh" size={20} color="#fff" />
+                    <Text style={styles.changeBtnText}>Change Photo</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.pickContainer}>
+                  <Text style={styles.pickLabel}>Take a photo or choose from gallery</Text>
+                  <View style={styles.pickButtons}>
+                    <TouchableOpacity
+                      style={styles.pickBtn}
+                      onPress={() => handlePick("camera")}
+                    >
+                      <Ionicons name="camera" size={32} color="#22c55e" />
+                      <Text style={styles.pickBtnText}>Camera</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.pickBtn}
+                      onPress={() => handlePick("gallery")}
+                    >
+                      <Ionicons name="images" size={32} color="#3b82f6" />
+                      <Text style={styles.pickBtnText}>Gallery</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
-      <Text style={styles.hint}>Attach a photo of the price tag or product to help the community verify.</Text>
-    </View>
+              {/* Product Name Input */}
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Product Name</Text>
+                <TextInput
+                  style={styles.input}
+                  value={productName}
+                  onChangeText={setProductName}
+                  placeholder="e.g., Carib Beer 6-Pack"
+                  placeholderTextColor="#999"
+                />
+              </View>
+
+              {/* Error Display */}
+              {(localError || error) && (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={20} color="#dc2626" />
+                  <Text style={styles.errorText}>{localError || error}</Text>
+                </View>
+              )}
+
+              {/* Upload Button */}
+              <TouchableOpacity
+                style={[
+                  styles.uploadBtn,
+                  (!imageUri || !productName.trim() || uploading) && styles.uploadBtnDisabled,
+                ]}
+                onPress={handleUpload}
+                disabled={!imageUri || !productName.trim() || uploading}
+              >
+                {uploading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="cloud-upload" size={20} color="#fff" />
+                    <Text style={styles.uploadBtnText}>Save Product Photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 12,
+    flex: 1,
+    backgroundColor: "#fff",
   },
-  label: {
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === "ios" ? 60 : 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  closeBtn: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1a1a1a",
+  },
+  content: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 20,
+  },
+  pickContainer: {
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  pickLabel: {
+    fontSize: 16,
+    color: "#666",
+    marginBottom: 16,
+  },
+  pickButtons: {
+    flexDirection: "row",
+    gap: 20,
+  },
+  pickBtn: {
+    width: 100,
+    height: 100,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#e5e5e5",
+    borderStyle: "dashed",
+  },
+  pickBtnText: {
+    marginTop: 8,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#1A1A1A',
+    color: "#666",
+  },
+  imagePreview: {
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  previewImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 16,
+    backgroundColor: "#f5f5f5",
+  },
+  changeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+    backgroundColor: "#666",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  changeBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  inputContainer: {
+    marginBottom: 24,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
     marginBottom: 8,
   },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  pickerBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: '#0277BD',
-    height: 52,
-    borderRadius: 999,
+  input: {
+    backgroundColor: "#f5f5f5",
+    borderRadius: 12,
     paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: "#1a1a1a",
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
   },
-  pickerBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 15,
+  errorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fef2f2",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    gap: 8,
   },
-  galleryBtn: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#0277BD',
+  errorText: {
+    color: "#dc2626",
+    fontSize: 14,
+    flex: 1,
   },
-  galleryBtnText: {
-    color: '#0277BD',
+  uploadBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#22c55e",
+    paddingVertical: 16,
+    borderRadius: 12,
+    gap: 8,
   },
-  previewContainer: {
-    position: 'relative',
-    alignSelf: 'flex-start',
+  uploadBtnDisabled: {
+    backgroundColor: "#ccc",
   },
-  preview: {
-    width: '100%',
-    height: 180,
-    borderRadius: 16,
-    backgroundColor: '#E2E8F0',
+  uploadBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
   },
-  removeBtn: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 999,
+  successContainer: {
+    alignItems: "center",
+    paddingVertical: 40,
   },
-  hint: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 6,
-    lineHeight: 18,
+  successIcon: {
+    marginBottom: 20,
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#1a1a1a",
+    marginBottom: 8,
+  },
+  successText: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 32,
+  },
+  doneBtn: {
+    backgroundColor: "#22c55e",
+    paddingHorizontal: 48,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  doneBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });
+
+export default ProductImagePicker;

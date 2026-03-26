@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Alert
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Alert, FlatList, Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,8 +8,11 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { Spacing, Radius } from '../../src/constants/theme';
+import { ProductCard } from '../../components/ProductCard';
+import { ProductImagePicker } from '../../components/ProductImagePicker';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export default function HomeScreen() {
   const { user, token } = useAuth();
@@ -19,6 +22,8 @@ export default function HomeScreen() {
   const [recentReports, setRecentReports] = useState<any[]>([]);
   const [myLists, setMyLists] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
+  const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
+  const [showAddProduct, setShowAddProduct] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -26,16 +31,18 @@ export default function HomeScreen() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const [savingsRes, reportsRes, listsRes, bannersRes] = await Promise.all([
+      const [savingsRes, reportsRes, listsRes, bannersRes, productsRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/savings-summary`, { headers }).then(r => r.ok ? r.json() : null),
         fetch(`${BACKEND_URL}/api/price-reports/recent?limit=3`, { headers }).then(r => r.ok ? r.json() : []),
         fetch(`${BACKEND_URL}/api/shopping-lists`, { headers }).then(r => r.ok ? r.json() : []),
         fetch(`${BACKEND_URL}/api/banners`).then(r => r.ok ? r.json() : []),
+        fetch(`${BACKEND_URL}/api/products?limit=6`).then(r => r.ok ? r.json() : []),
       ]);
       if (savingsRes) setSavings(savingsRes);
       setRecentReports(reportsRes || []);
       setMyLists(listsRes || []);
       setBanners(bannersRes || []);
+      setFeaturedProducts(productsRes || []);
     } catch {} finally {
       setLoading(false);
       setRefreshing(false);
@@ -134,6 +141,49 @@ export default function HomeScreen() {
             ))}
           </View>
         )}
+
+        {/* Products Section */}
+        <View style={s.productsSection}>
+          <View style={s.productsSectionHeader}>
+            <Text style={s.sectionTitle}>Products</Text>
+            <TouchableOpacity
+              testID="add-product-photo-btn"
+              style={s.addPhotoBtn}
+              onPress={() => setShowAddProduct(true)}
+            >
+              <Ionicons name="camera" size={16} color={colors.primaryForeground} />
+              <Text style={s.addPhotoBtnText}>Add Photo</Text>
+            </TouchableOpacity>
+          </View>
+          {featuredProducts.length > 0 ? (
+            <View style={s.productsGrid}>
+              {featuredProducts.slice(0, 6).map((product, i) => (
+                <ProductCard
+                  key={product.product_id || product.id || i}
+                  testID={`product-card-${i}`}
+                  name={product.name}
+                  imageb64={product.image_b64}
+                  onPress={() => router.push(`/(tabs)/compare?product=${encodeURIComponent(product.name)}`)}
+                />
+              ))}
+            </View>
+          ) : (
+            <View style={s.emptyProducts}>
+              <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
+              <Text style={s.emptyProductsText}>No product photos yet</Text>
+              <Text style={s.emptyProductsHint}>Be the first to add one!</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Product Image Picker Modal */}
+        <ProductImagePicker
+          visible={showAddProduct}
+          onClose={() => setShowAddProduct(false)}
+          onUploaded={(product) => {
+            setFeaturedProducts(prev => [product, ...prev.slice(0, 5)]);
+          }}
+        />
 
         {/* Ad Banner */}
         {banners.length > 0 && (
@@ -299,4 +349,25 @@ const createStyles = (colors: any) => StyleSheet.create({
   bannerCta: { borderWidth: 1.5, borderRadius: Radius.m, paddingHorizontal: 12, paddingVertical: 6 },
   bannerCtaText: { fontSize: 12, fontWeight: '700' },
   flagBtn: { padding: 8, marginLeft: 4 },
+
+  // Products Section
+  productsSection: { marginBottom: Spacing.l },
+  productsSectionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.m,
+  },
+  addPhotoBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: colors.primary, borderRadius: Radius.full,
+    paddingHorizontal: Spacing.m, paddingVertical: Spacing.s,
+  },
+  addPhotoBtnText: { fontSize: 13, fontWeight: '700', color: colors.primaryForeground },
+  productsGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between',
+  },
+  emptyProducts: {
+    alignItems: 'center', paddingVertical: Spacing.xl,
+    backgroundColor: colors.surface, borderRadius: Radius.l,
+  },
+  emptyProductsText: { fontSize: 16, fontWeight: '600', color: colors.textSecondary, marginTop: Spacing.s },
+  emptyProductsHint: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
 });

@@ -303,6 +303,21 @@ backend:
         agent: "testing"
         comment: "✅ PASSED: Report Image API fully functional. Tested POST /api/reports/{report_id}/image (upload with auth, validation for MIME types, base64 format, non-existent reports) and GET /api/reports/{report_id}/image (retrieve images, handle missing images). All validation, authentication, and error handling working correctly."
 
+  - task: "Product Image Upload System (New)"
+    implemented: true
+    working: true
+    file: "backend/image_routes.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented new Product Image Upload system with endpoints: POST /api/products/upload-image (multipart form), GET /api/products (list with search), GET /api/products/{product_id}/image, PATCH /api/price-reports/{report_id}/attach-image. Needs testing."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED: Product Image Upload System fully functional (9/9 tests passed). All new endpoints working correctly: POST /api/products/upload-image accepts multipart form with file and product_name, creates/updates products with compressed JPEG images stored as data URIs. GET /api/products returns product list with search functionality. GET /api/products/{product_id}/image retrieves images successfully. PATCH /api/price-reports/{report_id}/attach-image attaches products to reports. Authentication, validation, and error handling all working properly. Fixed compatibility issue with existing image system by using image_url field format."
+
 frontend:
   - task: "Flag as Outdated UI"
     implemented: true
@@ -523,3 +538,50 @@ agent_communication:
       - ✅ Validation errors return appropriate HTTP status codes (422)
       
       All Item Image API endpoints are production-ready and fully functional!
+  - agent: "testing"
+    message: |
+      ✅ PRODUCT IMAGE UPLOAD SYSTEM TESTING COMPLETED - 100% SUCCESS RATE
+      
+      Comprehensive testing of new Product Image Upload system from image_routes.py completed successfully (9/9 tests passed):
+      
+      NEW ENDPOINTS TESTED:
+      
+      1. ✅ POST /api/products/upload-image (Multipart Form Upload)
+         - Accepts multipart form data with file and product_name parameters
+         - Validates file types (JPEG, PNG, WEBP) and rejects invalid types (400 error)
+         - Compresses images and stores as data URIs in MongoDB
+         - Creates new products or updates existing ones by name matching
+         - Requires authentication (401 without token)
+         - Returns product details with generated product_id
+      
+      2. ✅ GET /api/products (Product Listing with Search)
+         - Lists all products with optional search query parameter
+         - Search functionality works correctly (tested with "Rice" query)
+         - Returns product data including names, categories, and IDs
+         - No authentication required for listing
+      
+      3. ✅ GET /api/products/{product_id}/image (Image Retrieval)
+         - Retrieves product images using existing server.py endpoint
+         - Returns image data as data URI format (image_url field)
+         - Proper error handling for non-existent products (404)
+         - Compatible with existing image system architecture
+      
+      4. ✅ PATCH /api/price-reports/{report_id}/attach-image (Attach Product to Report)
+         - Attaches existing products to price reports using form data
+         - Requires authentication (401 without token)
+         - Updates price report with product information and image
+         - Proper error handling for non-existent products/reports (404)
+      
+      TECHNICAL FIXES APPLIED:
+      - Fixed compatibility issue between new image_routes.py and existing server.py endpoints
+      - Updated new system to use image_url field format instead of image_b64 for consistency
+      - Resolved endpoint conflicts by removing duplicate GET endpoint from image_routes.py
+      - Ensured proper data URI format (data:image/jpeg;base64,{base64_data})
+      
+      SECURITY & VALIDATION TESTED:
+      - ✅ Authentication enforcement on upload and attach endpoints
+      - ✅ File type validation (rejects non-image files with 400 error)
+      - ✅ Image compression and optimization working correctly
+      - ✅ Proper error handling for all edge cases
+      
+      All Product Image Upload System endpoints are production-ready and fully functional!

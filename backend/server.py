@@ -1753,12 +1753,21 @@ async def get_traffic_status(request: Request):
         "recommendation": "Consider single-store trip" if is_peak else "Good time for multi-store trip",
     }
 
+# Import and register image routes
+import image_routes
+image_routes.db = db
+
 @app.on_event("startup")
 async def startup():
     await seed_database()
+    # Create indexes for image-related queries
+    await db.products.create_index("name")
+    await db.products.create_index("image_id")
+    await db.price_reports.create_index("product_id")
     logger.info("DohPayDaTT API started")
 
 app.include_router(api_router)
+app.include_router(image_routes.router, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,

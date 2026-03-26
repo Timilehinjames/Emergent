@@ -436,19 +436,19 @@ export default function HomeScreen() {
       if (auth) headers['Authorization'] = `Bearer ${auth}`;
 
       const [repRes, prodRes] = await Promise.all([
-        fetch(`${API_BASE}/api/reports`, { headers }),
-        fetch(`${API_BASE}/api/admin/products`, { headers }),
+        fetch(`${API_BASE}/api/price-reports/recent?limit=10`, { headers }),
+        fetch(`${API_BASE}/api/products?limit=12`, { headers }),
       ]);
 
       if (repRes.ok) {
         const data = await repRes.json();
         setReports(
-          (data.reports ?? data).slice(0, 10).map((r: any) => ({
-            id:            r._id ?? r.id,
-            item_name:     r.item_name,
+          (data ?? []).slice(0, 10).map((r: any) => ({
+            id:            r.report_id ?? r._id ?? r.id,
+            item_name:     r.product_name ?? r.item_name,
             price:         r.price,
             unit:          r.unit,
-            store:         r.store,
+            store:         r.store_name ?? r.store,
             region:        r.region,
             image_url:     r.image_url ?? null,
             is_outdated:   r.is_outdated ?? false,
@@ -461,13 +461,13 @@ export default function HomeScreen() {
       if (prodRes.ok) {
         const data = await prodRes.json();
         setFeatured(
-          (data.products ?? data).slice(0, 12).map((p: any) => ({
-            id:         p._id ?? p.id,
+          (data ?? []).slice(0, 12).map((p: any) => ({
+            id:         p.product_id ?? p._id ?? p.id,
             name:       p.name,
             price:      p.price ?? 0,
             unit:       p.unit,
             store:      p.store ?? '',
-            image_url:  p.image_url ?? null,
+            image_url:  p.image_b64 ? `data:image/jpeg;base64,${p.image_b64}` : (p.image_url ?? null),
             is_outdated: p.is_outdated ?? false,
             flag_count: p.flag_count ?? 0,
           })),

@@ -1271,6 +1271,35 @@ async def update_profile(request: Request):
     updated.pop("password_hash", None)
     return updated
 
+@api_router.post("/auth/change-password")
+async def change_password(request: Request):
+    """Change user password"""
+    user = await get_current_user(request)
+    body = await request.json()
+    
+    current_password = body.get("current_password")
+    new_password = body.get("new_password")
+    
+    if not current_password or not new_password:
+        raise HTTPException(status_code=400, detail="Current and new password are required")
+    
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    
+    # Verify current password
+    db_user = await db.users.find_one({"user_id": user["user_id"]})
+    if not db_user or not verify_password(current_password, db_user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    
+    # Update password
+    new_hash = hash_password(new_password)
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"password_hash": new_hash}}
+    )
+    
+    return {"success": True, "message": "Password changed successfully"}
+
 @api_router.get("/savings-summary")
 async def get_savings_summary(request: Request):
     user = await get_current_user(request)

@@ -13,6 +13,10 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="shopping-list" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="admin" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="edit-profile" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="change-password" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="landing" />
         </Stack>
       </AuthProvider>
     </ThemeProvider>

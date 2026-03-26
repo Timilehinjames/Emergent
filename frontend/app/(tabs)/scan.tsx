@@ -9,6 +9,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { Spacing, Radius, STORE_NAMES } from '../../src/constants/theme';
+import { ItemImagePicker, CapturedImage } from '../../components/ItemImagePicker';
+import { uploadReportImage } from '../../src/services/imageApi';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -32,6 +34,8 @@ export default function ScanScreen() {
   const [unit, setUnit] = useState('each');
   // Multi-item selection
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
+  // Item image for visual reference
+  const [itemImage, setItemImage] = useState<CapturedImage | null>(null);
 
   const pickImage = async (useCamera: boolean) => {
     const perm = useCamera
@@ -109,6 +113,17 @@ export default function ScanScreen() {
       });
       if (resp.ok) {
         const data = await resp.json();
+        
+        // Upload item image if one was captured
+        if (itemImage && data.report?.report_id) {
+          try {
+            await uploadReportImage(data.report.report_id, itemImage, productName);
+          } catch (imgErr) {
+            // Non-fatal: price report saved but image upload failed
+            console.warn('Image upload failed:', imgErr);
+          }
+        }
+        
         setSubmitted(true);
         Alert.alert('Success', `Price reported! +${data.points_earned} points`);
       } else if (resp.status === 409) {
@@ -182,6 +197,7 @@ export default function ScanScreen() {
     setImageBase64(null); setScanResult(null); setProductName(''); setPrice('');
     setStoreName(STORE_NAMES[0]); setQuantity('1'); setUnit('each');
     setSubmitted(false); setSelectedItems(new Set()); setSubmitError(null);
+    setItemImage(null);
   };
 
   const s = createStyles(colors);
@@ -308,6 +324,18 @@ export default function ScanScreen() {
                         <View style={[s.inputGroup, { flex: 0.6 }]}><Text style={s.label}>Qty</Text><TextInput testID="scan-qty-input" style={s.input} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholderTextColor={colors.textSecondary} /></View>
                         <View style={[s.inputGroup, { flex: 0.6 }]}><Text style={s.label}>Unit</Text><TextInput testID="scan-unit-input" style={s.input} value={unit} onChangeText={setUnit} placeholderTextColor={colors.textSecondary} /></View>
                       </View>
+                      
+                      {/* Item Image Picker */}
+                      <View style={s.inputGroup}>
+                        <Text style={s.label}>Product Photo (Optional)</Text>
+                        <ItemImagePicker
+                          onImageSelected={setItemImage}
+                          label="Add a photo for visual reference"
+                          disabled={submitting}
+                          style={{ marginTop: Spacing.xs }}
+                        />
+                      </View>
+                      
                       {submitError && (
                         <View style={s.errorBanner}>
                           <Ionicons name="alert-circle" size={20} color={colors.error} />

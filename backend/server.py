@@ -7,8 +7,6 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
-import base64
-from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
@@ -18,6 +16,7 @@ import bcrypt
 import jwt
 import httpx
 import hashlib
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -91,6 +90,64 @@ class ScanResult(BaseModel):
     unit: str = ""
     quantity: float = 0.0
     raw_text: str = ""
+
+# ============ ITEM IMAGE MODELS ============
+
+class ItemImageUpload(BaseModel):
+    """Payload for POST /api/products/{product_id}/image and POST /api/reports/{report_id}/image"""
+    image_data: str  # base64-encoded string (with or without data-URI prefix)
+    mime_type: str = "image/jpeg"  # image/jpeg | image/png | image/webp
+    item_name: Optional[str] = None  # optional label to tag/overwrite the item name
+
+class ItemImageResponse(BaseModel):
+    success: bool
+    image_url: str  # data-URI the frontend can use directly in <Image>
+    item_id: str
+    item_name: Optional[str]
+    message: str
+
+# ============ IMAGE HELPERS ============
+
+ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB limit after decode
+
+def _validate_and_normalise_image(image_data: str, mime_type: str) -> tuple:
+    """
+    Strips existing data-URI prefix if present.
+    Validates MIME type and decoded size.
+    Returns (clean_base64, detected_mime_type).
+    Raises ValueError with a human-readable message on failure.
+    """
+    # Strip data-URI prefix e.g. "data:image/jpeg;base64,/9j/4AA..."
+    if image_data.startswith("data:"):
+        match = re.match(r"data:(image/[^;]+);base64,(.+)", image_data, re.DOTALL)
+        if not match:
+            raise ValueError("Malformed data-URI prefix.")
+        detected_mime = match.group(1)
+        image_data = match.group(2)
+        mime_type = detected_mime
+
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise ValueError(
+            f"Unsupported image type '{mime_type}'. "
+            f"Accepted: {', '.join(ALLOWED_MIME_TYPES)}"
+        )
+
+    # Validate it's real base64
+    try:
+        decoded = base64.b64decode(image_data, validate=True)
+    except Exception:
+        raise ValueError("image_data is not valid base64.")
+
+    if len(decoded) > MAX_IMAGE_BYTES:
+        raise ValueError(
+            f"Image too large ({len(decoded)//1024} KB). Max is {MAX_IMAGE_BYTES//1024} KB."
+        )
+
+    return image_data, mime_type
+
+def _build_data_uri(base64_str: str, mime_type: str) -> str:
+    return f"data:{mime_type};base64,{base64_str}"
 
 # ============ AUTH HELPERS ============
 
@@ -409,6 +466,143 @@ async def search_price_reports(product: str = "", store: str = "", limit: int = 
         {"_id": 0, "photo_base64": 0}
     ).sort("created_at", -1).to_list(limit)
     return reports
+
+# ============ ITEM IMAGE ENDPOINTS ============
+
+@api_router.post(
+    "/products/{product_id}/image",
+    response_model=ItemImageResponse,
+    summary="Attach a user-captured photo to a product",
+    tags=["Images"],
+)
+async def upload_product_image(
+    product_id: str,
+    payload: ItemImageUpload,
+    request: Request,
+):
+    _ = await get_current_user(request)  # Auth required
+    
+    # Verify product exists
+    product = await db.products.find_one({"product_id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found.")
+
+    # Validate & normalise image
+    try:
+        clean_b64, mime = _validate_and_normalise_image(payload.image_data, payload.mime_type)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # Build data-URI (stored directly in Mongo — no separate file server needed)
+    data_uri = _build_data_uri(clean_b64, mime)
+
+    # Persist to MongoDB
+    update_fields = {"image_url": data_uri}
+    if payload.item_name:
+        update_fields["name"] = payload.item_name.strip()
+
+    await db.products.update_one(
+        {"product_id": product_id},
+        {"$set": update_fields},
+    )
+
+    return ItemImageResponse(
+        success=True,
+        image_url=data_uri,
+        item_id=product_id,
+        item_name=payload.item_name or product.get("name"),
+        message="Product image saved successfully.",
+    )
+
+
+@api_router.post(
+    "/reports/{report_id}/image",
+    response_model=ItemImageResponse,
+    summary="Attach a user-captured photo to a price report",
+    tags=["Images"],
+)
+async def upload_report_image(
+    report_id: str,
+    payload: ItemImageUpload,
+    request: Request,
+):
+    _ = await get_current_user(request)  # Auth required
+    
+    report = await db.price_reports.find_one({"report_id": report_id}, {"_id": 0})
+    if not report:
+        raise HTTPException(status_code=404, detail="Price report not found.")
+
+    try:
+        clean_b64, mime = _validate_and_normalise_image(payload.image_data, payload.mime_type)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    data_uri = _build_data_uri(clean_b64, mime)
+
+    update_fields = {"image_url": data_uri}
+    if payload.item_name:
+        update_fields["product_name"] = payload.item_name.strip()
+
+    await db.price_reports.update_one(
+        {"report_id": report_id},
+        {"$set": update_fields},
+    )
+
+    return ItemImageResponse(
+        success=True,
+        image_url=data_uri,
+        item_id=report_id,
+        item_name=payload.item_name or report.get("product_name"),
+        message="Report image saved successfully.",
+    )
+
+
+@api_router.get(
+    "/products/{product_id}/image",
+    summary="Get the image data-URI for a product",
+    tags=["Images"],
+)
+async def get_product_image(product_id: str):
+    product = await db.products.find_one(
+        {"product_id": product_id},
+        {"image_url": 1, "name": 1, "_id": 0},
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found.")
+
+    image_url = product.get("image_url")
+    if not image_url:
+        raise HTTPException(status_code=404, detail="No image uploaded for this product yet.")
+
+    return {
+        "item_id": product_id,
+        "item_name": product.get("name"),
+        "image_url": image_url,
+    }
+
+
+@api_router.get(
+    "/reports/{report_id}/image",
+    summary="Get the image data-URI for a price report",
+    tags=["Images"],
+)
+async def get_report_image(report_id: str):
+    report = await db.price_reports.find_one(
+        {"report_id": report_id},
+        {"image_url": 1, "product_name": 1, "_id": 0},
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="Price report not found.")
+
+    image_url = report.get("image_url")
+    if not image_url:
+        raise HTTPException(status_code=404, detail="No image uploaded for this report yet.")
+
+    return {
+        "item_id": report_id,
+        "item_name": report.get("product_name"),
+        "image_url": image_url,
+    }
 
 # ============ FLAG AS OUTDATED ============
 

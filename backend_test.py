@@ -499,7 +499,179 @@ async def main():
             else:
                 log_test("Admin Products Create - non-admin blocked", False, f"Expected 403, got {regular_create['status']}")
                 
-        # Step 13: Test authentication on all admin endpoints
+        # Step 13: Test Item Image API (Products and Reports)
+        print("\n📸 Testing Item Image API...")
+        
+        # Create a small valid JPEG base64 image for testing (1x1 red pixel)
+        # This is a minimal valid JPEG image as per image testing guidelines
+        test_image_base64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/8A8A"
+        
+        # Test payload for image upload
+        image_payload = {
+            "image_data": test_image_base64,
+            "mime_type": "image/jpeg",
+            "item_name": "Test Product Image"
+        }
+        
+        # First, create a product for testing product image API
+        test_product_data = {
+            "name": "Test Product for Image",
+            "category": "Test Category",
+            "brand": "Test Brand",
+            "unit_type": "each",
+            "tags": ["test"]
+        }
+        
+        create_test_product = await client.make_api_call("POST", "/admin/products", client.admin_token, test_product_data)
+        test_product_id = None
+        if create_test_product["success"] and "product_id" in create_test_product["data"]:
+            test_product_id = create_test_product["data"]["product_id"]
+            log_test("Create test product for image API", True)
+        else:
+            log_test("Create test product for image API", False, f"Failed: {create_test_product}")
+            
+        # Test POST /api/products/{product_id}/image - Upload product image
+        if test_product_id:
+            upload_product_image = await client.make_api_call("POST", f"/products/{test_product_id}/image", 
+                                                            client.admin_token, image_payload)
+            if upload_product_image["success"]:
+                response_data = upload_product_image["data"]
+                if (response_data.get("success") and 
+                    response_data.get("image_url") and 
+                    response_data.get("item_id") == test_product_id):
+                    log_test("Upload product image", True)
+                else:
+                    log_test("Upload product image", False, f"Invalid response structure: {response_data}")
+            else:
+                log_test("Upload product image", False, f"Failed: {upload_product_image}")
+                
+            # Test GET /api/products/{product_id}/image - Get product image
+            get_product_image = await client.make_api_call("GET", f"/products/{test_product_id}/image")
+            if get_product_image["success"]:
+                image_data = get_product_image["data"]
+                if (image_data.get("image_url") and 
+                    image_data.get("item_id") == test_product_id):
+                    log_test("Get product image", True)
+                else:
+                    log_test("Get product image", False, f"Invalid response: {image_data}")
+            else:
+                log_test("Get product image", False, f"Failed: {get_product_image}")
+                
+        # Create a price report for testing report image API
+        test_report = await client.create_price_report(client.admin_token, "Test Product for Image Report", "Test Store", 25.99)
+        test_report_id = None
+        if test_report["success"]:
+            test_report_id = test_report["data"]["report"]["report_id"]
+            log_test("Create test report for image API", True)
+        else:
+            log_test("Create test report for image API", False, test_report["error"])
+            
+        # Test POST /api/reports/{report_id}/image - Upload report image
+        if test_report_id:
+            upload_report_image = await client.make_api_call("POST", f"/reports/{test_report_id}/image", 
+                                                           client.admin_token, image_payload)
+            if upload_report_image["success"]:
+                response_data = upload_report_image["data"]
+                if (response_data.get("success") and 
+                    response_data.get("image_url") and 
+                    response_data.get("item_id") == test_report_id):
+                    log_test("Upload report image", True)
+                else:
+                    log_test("Upload report image", False, f"Invalid response structure: {response_data}")
+            else:
+                log_test("Upload report image", False, f"Failed: {upload_report_image}")
+                
+            # Test GET /api/reports/{report_id}/image - Get report image
+            get_report_image = await client.make_api_call("GET", f"/reports/{test_report_id}/image")
+            if get_report_image["success"]:
+                image_data = get_report_image["data"]
+                if (image_data.get("image_url") and 
+                    image_data.get("item_id") == test_report_id):
+                    log_test("Get report image", True)
+                else:
+                    log_test("Get report image", False, f"Invalid response: {image_data}")
+            else:
+                log_test("Get report image", False, f"Failed: {get_report_image}")
+                
+        # Test validation - Invalid MIME type
+        invalid_mime_payload = {
+            "image_data": test_image_base64,
+            "mime_type": "image/bmp",  # Invalid MIME type
+            "item_name": "Test Invalid MIME"
+        }
+        
+        if test_product_id:
+            invalid_mime_test = await client.make_api_call("POST", f"/products/{test_product_id}/image", 
+                                                         client.admin_token, invalid_mime_payload)
+            if invalid_mime_test["status"] == 422:
+                log_test("Image validation - Invalid MIME type", True)
+            else:
+                log_test("Image validation - Invalid MIME type", False, f"Expected 422, got {invalid_mime_test['status']}")
+                
+        # Test validation - Invalid base64
+        invalid_base64_payload = {
+            "image_data": "invalid_base64_data",
+            "mime_type": "image/jpeg",
+            "item_name": "Test Invalid Base64"
+        }
+        
+        if test_product_id:
+            invalid_base64_test = await client.make_api_call("POST", f"/products/{test_product_id}/image", 
+                                                           client.admin_token, invalid_base64_payload)
+            if invalid_base64_test["status"] == 422:
+                log_test("Image validation - Invalid base64", True)
+            else:
+                log_test("Image validation - Invalid base64", False, f"Expected 422, got {invalid_base64_test['status']}")
+                
+        # Test authentication - Upload without auth token
+        if test_product_id:
+            no_auth_upload = await client.make_api_call("POST", f"/products/{test_product_id}/image", 
+                                                      None, image_payload)
+            if no_auth_upload["status"] == 401:
+                log_test("Image upload - Auth required", True)
+            else:
+                log_test("Image upload - Auth required", False, f"Expected 401, got {no_auth_upload['status']}")
+                
+        # Test with non-existent product ID
+        fake_product_id = "fake-product-id-12345"
+        fake_product_test = await client.make_api_call("POST", f"/products/{fake_product_id}/image", 
+                                                     client.admin_token, image_payload)
+        if fake_product_test["status"] == 404:
+            log_test("Image upload - Non-existent product", True)
+        else:
+            log_test("Image upload - Non-existent product", False, f"Expected 404, got {fake_product_test['status']}")
+            
+        # Test with non-existent report ID
+        fake_report_id = "fake-report-id-12345"
+        fake_report_test = await client.make_api_call("POST", f"/reports/{fake_report_id}/image", 
+                                                    client.admin_token, image_payload)
+        if fake_report_test["status"] == 404:
+            log_test("Image upload - Non-existent report", True)
+        else:
+            log_test("Image upload - Non-existent report", False, f"Expected 404, got {fake_report_test['status']}")
+            
+        # Test getting image from product/report without image
+        if test_product_id:
+            # Create another product without image
+            another_product = await client.make_api_call("POST", "/admin/products", client.admin_token, {
+                "name": "Product Without Image",
+                "category": "Test",
+                "brand": "Test",
+                "unit_type": "each"
+            })
+            if another_product["success"]:
+                no_image_product_id = another_product["data"]["product_id"]
+                no_image_test = await client.make_api_call("GET", f"/products/{no_image_product_id}/image")
+                if no_image_test["status"] == 404:
+                    log_test("Get image - Product without image", True)
+                else:
+                    log_test("Get image - Product without image", False, f"Expected 404, got {no_image_test['status']}")
+                    
+        # Clean up test product
+        if test_product_id:
+            await client.make_api_call("DELETE", f"/admin/products/{test_product_id}", client.admin_token)
+            
+        # Step 14: Test authentication on all admin endpoints
         print("\n🔒 Testing authentication on admin endpoints...")
         
         # Test without token

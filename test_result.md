@@ -273,6 +273,36 @@ backend:
         agent: "testing"
         comment: "✅ PASSED: Admin Products API fully functional. All CRUD operations tested: GET /api/admin/products (list), POST /api/admin/products (create), PUT /api/admin/products/{id} (update), DELETE /api/admin/products/{id} (delete). Admin authentication properly enforced on all endpoints (403 for non-admin, 401 without auth)."
 
+  - task: "Item Image API (Products)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented POST /api/products/{product_id}/image and GET /api/products/{product_id}/image endpoints. Stores images as base64 data URIs in MongoDB. Auth required for upload."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED: Product Image API fully functional. Tested POST /api/products/{product_id}/image (upload with auth, validation for MIME types, base64 format, non-existent products) and GET /api/products/{product_id}/image (retrieve images, handle missing images). All validation, authentication, and error handling working correctly."
+
+  - task: "Item Image API (Reports)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented POST /api/reports/{report_id}/image and GET /api/reports/{report_id}/image endpoints. Stores images as base64 data URIs in MongoDB. Auth required for upload."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED: Report Image API fully functional. Tested POST /api/reports/{report_id}/image (upload with auth, validation for MIME types, base64 format, non-existent reports) and GET /api/reports/{report_id}/image (retrieve images, handle missing images). All validation, authentication, and error handling working correctly."
+
 frontend:
   - task: "Flag as Outdated UI"
     implemented: true
@@ -317,15 +347,36 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Smart Split API"
-    - "Traffic Status API"
-    - "Admin Products API (CRUD)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "main"
+    message: |
+      Implemented Item Image feature based on user-provided artifacts:
+      
+      Backend changes (server.py):
+      1. Added ItemImageUpload and ItemImageResponse Pydantic models
+      2. Added image validation helper (_validate_and_normalise_image) - validates MIME type, base64, and max 5MB size
+      3. Added 4 new endpoints:
+         - POST /api/products/{product_id}/image - Upload image for a product (auth required)
+         - GET /api/products/{product_id}/image - Get image for a product
+         - POST /api/reports/{report_id}/image - Upload image for a price report (auth required)
+         - GET /api/reports/{report_id}/image - Get image for a price report
+      
+      Frontend changes:
+      1. Created /app/frontend/src/services/imageApi.ts - API wrapper for image endpoints
+      2. Updated /app/frontend/components/ItemImagePicker.tsx - Camera/gallery picker component
+      3. Created /app/frontend/components/ItemCard.tsx - Image-first card component
+      4. Updated /app/frontend/app/(tabs)/scan.tsx - Added ItemImagePicker to the price report form
+      
+      Please test the backend image endpoints:
+      - Register/login with admin@test.com / test123
+      - Create a price report first
+      - Then upload an image to that report using POST /api/reports/{report_id}/image
+      - Verify the image is returned with GET /api/reports/{report_id}/image
   - agent: "main"
     message: |
       Implemented the following new features:
@@ -433,3 +484,42 @@ agent_communication:
       - ✅ Proper HTTP status codes returned for auth failures
       
       All new backend APIs are production-ready and fully functional!
+  - agent: "testing"
+    message: |
+      ✅ ITEM IMAGE API TESTING COMPLETED - 100% SUCCESS RATE
+      
+      Comprehensive testing of Item Image API endpoints completed successfully (12/12 image tests passed):
+      
+      ENDPOINTS TESTED:
+      
+      1. ✅ PRODUCT IMAGE API
+         - POST /api/products/{product_id}/image: Upload product images with base64 validation
+         - GET /api/products/{product_id}/image: Retrieve product images successfully
+         - Proper authentication enforcement (401 without token)
+         - Validation for invalid MIME types (422 for unsupported formats)
+         - Validation for invalid base64 data (422 for malformed data)
+         - Error handling for non-existent products (404)
+         - Error handling for products without images (404)
+      
+      2. ✅ REPORT IMAGE API  
+         - POST /api/reports/{report_id}/image: Upload report images with base64 validation
+         - GET /api/reports/{report_id}/image: Retrieve report images successfully
+         - Proper authentication enforcement (401 without token)
+         - Validation for invalid MIME types (422 for unsupported formats)
+         - Validation for invalid base64 data (422 for malformed data)
+         - Error handling for non-existent reports (404)
+         - Error handling for reports without images (404)
+      
+      IMAGE VALIDATION TESTED:
+      - ✅ Base64 encoding validation working correctly
+      - ✅ MIME type validation (accepts image/jpeg, image/png, image/webp)
+      - ✅ Rejects unsupported formats (image/bmp returns 422)
+      - ✅ Image storage as data URIs in MongoDB working
+      - ✅ Image retrieval returns proper data URI format
+      
+      SECURITY & AUTHENTICATION:
+      - ✅ Upload endpoints require valid authentication (401 without token)
+      - ✅ Proper error handling for non-existent resources (404)
+      - ✅ Validation errors return appropriate HTTP status codes (422)
+      
+      All Item Image API endpoints are production-ready and fully functional!

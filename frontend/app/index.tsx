@@ -132,7 +132,7 @@ export default function AuthScreen() {
                   <TextInput
                     testID="auth-name-input"
                     style={s.input}
-                    placeholder="e.g. Trini Saver"
+                    placeholder="e.g. John"
                     placeholderTextColor={colors.textSecondary}
                     value={name}
                     onChangeText={setName}

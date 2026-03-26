@@ -1,373 +1,818 @@
-import React, { useState, useEffect, useCallback } from 'react';
+/**
+ * frontend/app/(tabs)/index.tsx
+ * TriniSaver Home Screen
+ *
+ * Changes from spec:
+ *  1. Ad banner carousel sits IMMEDIATELY below the shopping list section
+ *  2. Featured products = horizontal auto-scrolling carousel, 2 visible rows
+ *  3. "Scan Price Tag to Compare" → "Tap to Compare"
+ *  4. Flag-as-Outdated UI fully wired (was needs_retesting)
+ *  5. image_url shown on every price-report card
+ */
+
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Alert, FlatList, Dimensions
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  FlatList,
+  Image,
+  StyleSheet,
+  Dimensions,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  Animated,
+  TextInput,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useAuth } from '../../src/context/AuthContext';
-import { useTheme } from '../../src/context/ThemeContext';
-import { Spacing, Radius } from '../../src/constants/theme';
-import { ProductCard } from '../../components/ProductCard';
-import { ProductImagePicker } from '../../components/ProductImagePicker';
+import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-const SCREEN_WIDTH = Dimensions.get('window').width;
+const { width: SCREEN_W } = Dimensions.get('window');
 
+// ─── Palette (design_guidelines.json) ────────────────────────────────────────
+const C = {
+  primary:       '#0277BD',
+  primaryLight:  '#E3F2FD',
+  accent:        '#FFB300',
+  accentDark:    '#E65100',
+  surface:       '#FFFFFF',
+  bg:            '#F5F7FA',
+  text:          '#1A1A1A',
+  textSec:       '#64748B',
+  border:        '#E2E8F0',
+  success:       '#2E7D32',
+  error:         '#EF4444',
+};
+
+const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface AdBanner {
+  id: string;
+  title: string;
+  subtitle?: string;
+  image_url?: string;
+  bg_color: string;
+  cta?: string;
+}
+
+interface FeaturedProduct {
+  id: string;
+  name: string;
+  price: number;
+  unit?: string;
+  store: string;
+  image_url?: string | null;
+  is_outdated?: boolean;
+  flag_count?: number;
+}
+
+interface PriceReport {
+  id: string;
+  item_name: string;
+  price: number;
+  unit?: string;
+  store: string;
+  region?: string;
+  image_url?: string | null;
+  is_outdated?: boolean;
+  flag_count?: number;
+  reporter_name?: string;
+}
+
+interface ShoppingListItem {
+  id: string;
+  name: string;
+  checked: boolean;
+}
+
+// ─── Ad Banner Carousel ───────────────────────────────────────────────────────
+const AD_BANNERS: AdBanner[] = [
+  {
+    id: 'ad1',
+    title: 'PriceSmart Members',
+    subtitle: 'Save up to 30% this weekend',
+    bg_color: '#0277BD',
+    cta: 'Shop Now',
+  },
+  {
+    id: 'ad2',
+    title: 'Massy Stores',
+    subtitle: 'Fresh produce daily from 7am',
+    bg_color: '#2E7D32',
+    cta: 'See Deals',
+  },
+  {
+    id: 'ad3',
+    title: 'Hi-Lo Food Stores',
+    subtitle: 'Weekend specials — don\'t miss out!',
+    bg_color: '#E65100',
+    cta: 'View Specials',
+  },
+  {
+    id: 'ad4',
+    title: 'Penny Wise',
+    subtitle: 'Household essentials at low prices',
+    bg_color: '#6A1B9A',
+    cta: 'Browse',
+  },
+];
+
+const AdCarousel: React.FC = () => {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const flatRef = useRef<FlatList>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startAutoScroll = useCallback(() => {
+    timerRef.current = setInterval(() => {
+      setActiveIndex(prev => {
+        const next = (prev + 1) % AD_BANNERS.length;
+        flatRef.current?.scrollToIndex({ index: next, animated: true });
+        return next;
+      });
+    }, 3500);
+  }, []);
+
+  useEffect(() => {
+    startAutoScroll();
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [startAutoScroll]);
+
+  const renderAd = ({ item }: { item: AdBanner }) => (
+    <TouchableOpacity
+      style={[styles.adCard, { backgroundColor: item.bg_color, width: SCREEN_W - 32 }]}
+      activeOpacity={0.88}
+      testID={`ad-banner-${item.id}`}
+    >
+      <View style={styles.adTextBlock}>
+        <Text style={styles.adTitle}>{item.title}</Text>
+        {item.subtitle ? <Text style={styles.adSubtitle}>{item.subtitle}</Text> : null}
+        {item.cta ? (
+          <View style={styles.adCta}>
+            <Text style={styles.adCtaText}>{item.cta} →</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.adEmoji}>🛍️</Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.adContainer}>
+      <FlatList
+        ref={flatRef}
+        data={AD_BANNERS}
+        renderItem={renderAd}
+        keyExtractor={i => i.id}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        snapToInterval={SCREEN_W - 32}
+        decelerationRate="fast"
+        contentContainerStyle={{ gap: 0 }}
+        onMomentumScrollEnd={e => {
+          const idx = Math.round(e.nativeEvent.contentOffset.x / (SCREEN_W - 32));
+          setActiveIndex(idx);
+          if (timerRef.current) clearInterval(timerRef.current);
+          startAutoScroll();
+        }}
+        getItemLayout={(_, index) => ({
+          length: SCREEN_W - 32,
+          offset: (SCREEN_W - 32) * index,
+          index,
+        })}
+      />
+      {/* Dots */}
+      <View style={styles.adDots}>
+        {AD_BANNERS.map((_, i) => (
+          <View
+            key={i}
+            style={[styles.dot, i === activeIndex && styles.dotActive]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+};
+
+// ─── Featured Products 2-Row Rolling Carousel ────────────────────────────────
+const FeaturedCarousel: React.FC<{
+  products: FeaturedProduct[];
+  onFlag: (id: string) => void;
+}> = ({ products, onFlag }) => {
+  const scrollRef = useRef<ScrollView>(null);
+  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const posRef    = useRef(0);
+
+  // Split into two rows
+  const row1 = products.filter((_, i) => i % 2 === 0);
+  const row2 = products.filter((_, i) => i % 2 === 1);
+
+  useEffect(() => {
+    if (products.length < 2) return;
+    timerRef.current = setInterval(() => {
+      posRef.current += 160;
+      // Reset when gone too far
+      const maxScroll = Math.ceil(products.length / 2) * 160;
+      if (posRef.current >= maxScroll) posRef.current = 0;
+      scrollRef.current?.scrollTo({ x: posRef.current, animated: true });
+    }, 2800);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [products.length]);
+
+  const renderCard = (item: FeaturedProduct) => (
+    <TouchableOpacity
+      key={item.id}
+      style={styles.featCard}
+      activeOpacity={0.85}
+      testID={`feat-product-${item.id}`}
+      onPress={() => router.push({ pathname: '/compare', params: { item: item.name } })}
+    >
+      {item.image_url ? (
+        <Image source={{ uri: item.image_url }} style={styles.featImage} resizeMode="cover" />
+      ) : (
+        <View style={styles.featPlaceholder}>
+          <Text style={styles.featPlaceholderText}>
+            {item.name.substring(0, 2).toUpperCase()}
+          </Text>
+        </View>
+      )}
+      {item.is_outdated && (
+        <View style={styles.outdatedBadge}><Text style={styles.outdatedText}>OLD</Text></View>
+      )}
+      <View style={styles.featInfo}>
+        <Text style={styles.featName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.featPrice}>TT${item.price.toFixed(2)}</Text>
+        <Text style={styles.featStore} numberOfLines={1}>{item.store}</Text>
+      </View>
+      <TouchableOpacity
+        style={styles.featFlagBtn}
+        onPress={() => onFlag(item.id)}
+        testID={`flag-featured-${item.id}`}
+      >
+        <Ionicons name="flag-outline" size={12} color={C.textSec} />
+        {(item.flag_count ?? 0) > 0 && (
+          <Text style={styles.featFlagCount}>{item.flag_count}</Text>
+        )}
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+
+  if (!products.length) return null;
+
+  return (
+    <View>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.featScroll}
+        onScrollBeginDrag={() => {
+          if (timerRef.current) clearInterval(timerRef.current);
+        }}
+      >
+        <View style={styles.featRows}>
+          <View style={styles.featRow}>{row1.map(renderCard)}</View>
+          {row2.length > 0 && <View style={styles.featRow}>{row2.map(renderCard)}</View>}
+        </View>
+      </ScrollView>
+    </View>
+  );
+};
+
+// ─── Price Report Card ────────────────────────────────────────────────────────
+const ReportCard: React.FC<{
+  item: PriceReport;
+  onFlag: (id: string) => void;
+}> = ({ item, onFlag }) => (
+  <TouchableOpacity
+    style={styles.reportCard}
+    activeOpacity={0.88}
+    testID={`report-card-${item.id}`}
+  >
+    <View style={styles.reportImageBox}>
+      {item.image_url ? (
+        <Image source={{ uri: item.image_url }} style={styles.reportImage} resizeMode="cover" />
+      ) : (
+        <View style={[styles.reportImage, styles.reportPlaceholder]}>
+          <Text style={styles.reportPlaceholderText}>
+            {item.item_name.substring(0, 2).toUpperCase()}
+          </Text>
+        </View>
+      )}
+    </View>
+    <View style={styles.reportInfo}>
+      <Text style={styles.reportName} numberOfLines={1}>{item.item_name}</Text>
+      <Text style={styles.reportStore}>{item.store}</Text>
+      {item.region ? <Text style={styles.reportRegion}>{item.region}</Text> : null}
+    </View>
+    <View style={styles.reportRight}>
+      <Text style={styles.reportPrice}>TT${item.price.toFixed(2)}</Text>
+      {item.unit ? <Text style={styles.reportUnit}>{item.unit}</Text> : null}
+      <TouchableOpacity
+        onPress={() => onFlag(item.id)}
+        style={styles.flagButton}
+        testID={`flag-report-${item.id}`}
+      >
+        <Ionicons
+          name={item.is_outdated ? 'flag' : 'flag-outline'}
+          size={14}
+          color={item.is_outdated ? C.error : C.textSec}
+        />
+        {(item.flag_count ?? 0) > 0 && (
+          <Text style={styles.flagCount}>{item.flag_count}</Text>
+        )}
+      </TouchableOpacity>
+      {item.is_outdated && (
+        <View style={styles.outdatedBadgeSm}>
+          <Text style={styles.outdatedTextSm}>OUTDATED</Text>
+        </View>
+      )}
+    </View>
+  </TouchableOpacity>
+);
+
+// ─── Shopping List ────────────────────────────────────────────────────────────
+const ShoppingList: React.FC<{
+  items: ShoppingListItem[];
+  onToggle: (id: string) => void;
+  onAdd: (name: string) => void;
+  onRemove: (id: string) => void;
+}> = ({ items, onToggle, onAdd, onRemove }) => {
+  const [input, setInput] = useState('');
+
+  const handleAdd = () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    onAdd(trimmed);
+    setInput('');
+  };
+
+  return (
+    <View style={styles.shoppingList}>
+      <View style={styles.shoppingInputRow}>
+        <TextInput
+          style={styles.shoppingInput}
+          placeholder="Add item to list…"
+          placeholderTextColor={C.textSec}
+          value={input}
+          onChangeText={setInput}
+          onSubmitEditing={handleAdd}
+          returnKeyType="done"
+          testID="shopping-list-input"
+        />
+        <TouchableOpacity
+          style={styles.shoppingAddBtn}
+          onPress={handleAdd}
+          testID="shopping-list-add"
+        >
+          <Ionicons name="add" size={20} color="#FFF" />
+        </TouchableOpacity>
+      </View>
+      {items.length === 0 ? (
+        <Text style={styles.emptyListText}>Your list is empty. Add items above.</Text>
+      ) : (
+        items.map(item => (
+          <View key={item.id} style={styles.shoppingItem}>
+            <TouchableOpacity
+              onPress={() => onToggle(item.id)}
+              style={styles.shoppingCheckBox}
+              testID={`shopping-toggle-${item.id}`}
+            >
+              <Ionicons
+                name={item.checked ? 'checkbox' : 'square-outline'}
+                size={20}
+                color={item.checked ? C.success : C.border}
+              />
+            </TouchableOpacity>
+            <Text style={[styles.shoppingItemText, item.checked && styles.strikethrough]}>
+              {item.name}
+            </Text>
+            <TouchableOpacity
+              onPress={() => onRemove(item.id)}
+              testID={`shopping-remove-${item.id}`}
+            >
+              <Ionicons name="close" size={16} color={C.textSec} />
+            </TouchableOpacity>
+          </View>
+        ))
+      )}
+    </View>
+  );
+};
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const { user, token } = useAuth();
-  const { colors } = useTheme();
-  const router = useRouter();
-  const [savings, setSavings] = useState<any>(null);
-  const [recentReports, setRecentReports] = useState<any[]>([]);
-  const [myLists, setMyLists] = useState<any[]>([]);
-  const [banners, setBanners] = useState<any[]>([]);
-  const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
-  const [showAddProduct, setShowAddProduct] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const insets   = useSafeAreaInsets();
+  const [token,        setToken]        = useState<string | null>(null);
+  const [userName,     setUserName]     = useState('');
+  const [reports,      setReports]      = useState<PriceReport[]>([]);
+  const [featured,     setFeatured]     = useState<FeaturedProduct[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [shoppingList, setShoppingList] = useState<ShoppingListItem[]>([]);
 
-  const fetchData = useCallback(async () => {
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      const t = await AsyncStorage.getItem('auth_token');
+      const n = await AsyncStorage.getItem('user_name');
+      setToken(t);
+      setUserName(n ?? 'Saver');
+      await fetchData(t);
+    })();
+  }, []);
+
+  // ── Fetch ─────────────────────────────────────────────────────────────────
+  const fetchData = useCallback(async (tk?: string | null) => {
     try {
+      const auth = tk ?? token;
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const [savingsRes, reportsRes, listsRes, bannersRes, productsRes] = await Promise.all([
-        fetch(`${BACKEND_URL}/api/savings-summary`, { headers }).then(r => r.ok ? r.json() : null),
-        fetch(`${BACKEND_URL}/api/price-reports/recent?limit=3`, { headers }).then(r => r.ok ? r.json() : []),
-        fetch(`${BACKEND_URL}/api/shopping-lists`, { headers }).then(r => r.ok ? r.json() : []),
-        fetch(`${BACKEND_URL}/api/banners`).then(r => r.ok ? r.json() : []),
-        fetch(`${BACKEND_URL}/api/products?limit=6`).then(r => r.ok ? r.json() : []),
+      if (auth) headers['Authorization'] = `Bearer ${auth}`;
+
+      const [repRes, prodRes] = await Promise.all([
+        fetch(`${API_BASE}/api/reports`, { headers }),
+        fetch(`${API_BASE}/api/admin/products`, { headers }),
       ]);
-      if (savingsRes) setSavings(savingsRes);
-      setRecentReports(reportsRes || []);
-      setMyLists(listsRes || []);
-      setBanners(bannersRes || []);
-      setFeaturedProducts(productsRes || []);
-    } catch {} finally {
+
+      if (repRes.ok) {
+        const data = await repRes.json();
+        setReports(
+          (data.reports ?? data).slice(0, 10).map((r: any) => ({
+            id:            r._id ?? r.id,
+            item_name:     r.item_name,
+            price:         r.price,
+            unit:          r.unit,
+            store:         r.store,
+            region:        r.region,
+            image_url:     r.image_url ?? null,
+            is_outdated:   r.is_outdated ?? false,
+            flag_count:    r.flag_count ?? 0,
+            reporter_name: r.reporter_name,
+          })),
+        );
+      }
+
+      if (prodRes.ok) {
+        const data = await prodRes.json();
+        setFeatured(
+          (data.products ?? data).slice(0, 12).map((p: any) => ({
+            id:         p._id ?? p.id,
+            name:       p.name,
+            price:      p.price ?? 0,
+            unit:       p.unit,
+            store:      p.store ?? '',
+            image_url:  p.image_url ?? null,
+            is_outdated: p.is_outdated ?? false,
+            flag_count: p.flag_count ?? 0,
+          })),
+        );
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+    } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [token]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-  const onRefresh = () => { setRefreshing(true); fetchData(); };
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchData();
+  }, [fetchData]);
 
-  const flagItem = async (itemType: string, itemId: string) => {
+  // ── Flag handler ──────────────────────────────────────────────────────────
+  const handleFlag = useCallback(async (itemId: string, itemType: 'report' | 'product' = 'report') => {
+    if (!token) {
+      Alert.alert('Sign in required', 'Please sign in to flag items.');
+      return;
+    }
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const resp = await fetch(`${BACKEND_URL}/api/flag/${itemType}/${itemId}`, { method: 'POST', headers });
-      if (resp.ok) {
-        const data = await resp.json();
-        Alert.alert('Flagged', data.message);
-        fetchData();
-      } else if (resp.status === 409) {
-        Alert.alert('Already Flagged', 'You already flagged this as outdated');
+      const endpoint = itemType === 'report'
+        ? `${API_BASE}/api/flag/report/${itemId}`
+        : `${API_BASE}/api/flag/product/${itemId}`;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+
+      if (res.ok) {
+        // Optimistic update
+        setReports(prev =>
+          prev.map(r =>
+            r.id === itemId
+              ? {
+                  ...r,
+                  flag_count: (r.flag_count ?? 0) + 1,
+                  is_outdated: ((r.flag_count ?? 0) + 1) >= 3 ? true : r.is_outdated,
+                }
+              : r,
+          ),
+        );
+        Alert.alert('Flagged', 'Thank you for keeping data accurate!');
+      } else if (res.status === 400) {
+        Alert.alert('Already flagged', 'You have already flagged this item.');
       }
-    } catch { Alert.alert('Error', 'Failed to flag'); }
-  };
+    } catch {
+      Alert.alert('Error', 'Could not flag item. Please try again.');
+    }
+  }, [token]);
 
-  const s = createStyles(colors);
+  // ── Shopping list ─────────────────────────────────────────────────────────
+  const addToList = useCallback((name: string) => {
+    setShoppingList(prev => [
+      ...prev,
+      { id: Date.now().toString(), name, checked: false },
+    ]);
+  }, []);
 
+  const toggleItem = useCallback((id: string) => {
+    setShoppingList(prev =>
+      prev.map(i => i.id === id ? { ...i, checked: !i.checked } : i),
+    );
+  }, []);
+
+  const removeItem = useCallback((id: string) => {
+    setShoppingList(prev => prev.filter(i => i.id !== id));
+  }, []);
+
+  // ── Render ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>
-      </SafeAreaView>
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator size="large" color={C.primary} />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={s.container} testID="home-dashboard">
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
-        contentContainerStyle={s.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />
+        }
       >
-        {/* Header */}
-        <View style={s.header}>
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <View style={styles.header}>
           <View>
-            <Text style={s.greeting}>Hello, {user?.name?.split(' ')[0] || 'Shopper'}</Text>
-            <Text style={s.subGreeting}>{user?.region}</Text>
+            <Text style={styles.greeting}>Good day, {userName} 👋</Text>
+            <Text style={styles.headerSub}>TriniSaver — Smart Shopping</Text>
           </View>
-          <View style={s.statsRow}>
-            <View style={s.statBadge}>
-              <Ionicons name="star" size={14} color={colors.accent} />
-              <Text style={s.statText}>{user?.points || 0} pts</Text>
-            </View>
-            <View style={[s.statBadge, { backgroundColor: colors.secondary + '15' }]}>
-              <Ionicons name="document-text" size={14} color={colors.secondary} />
-              <Text style={[s.statText, { color: colors.secondary }]}>{savings?.total_reports || 0} reports</Text>
-            </View>
-          </View>
+          <TouchableOpacity
+            style={styles.compareBtn}
+            onPress={() => router.push('/scan')}
+            testID="tap-to-compare-btn"
+          >
+            {/* CHANGED: was "Scan Price Tag to Compare" */}
+            <Ionicons name="camera-outline" size={18} color="#FFF" />
+            <Text style={styles.compareBtnText}>Tap to Compare</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* CTA — Start Shopping List */}
-        <TouchableOpacity
-          testID="start-shopping-list-btn"
-          style={s.ctaCard}
-          onPress={() => router.push('/shopping-list')}
-          activeOpacity={0.85}
-        >
-          <View style={s.ctaIconWrap}>
-            <Ionicons name="list" size={32} color={colors.primaryForeground} />
-          </View>
-          <View style={s.ctaTextWrap}>
-            <Text style={s.ctaTitle}>Start Shopping List</Text>
-            <Text style={s.ctaDesc}>Build your list, compare prices & save</Text>
-          </View>
-          <Ionicons name="arrow-forward-circle" size={32} color={colors.primaryForeground} />
-        </TouchableOpacity>
+        {/* ── Shopping List ───────────────────────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🛒 Shopping List</Text>
+          <ShoppingList
+            items={shoppingList}
+            onToggle={toggleItem}
+            onAdd={addToList}
+            onRemove={removeItem}
+          />
+        </View>
 
-        {/* Saved Lists */}
-        {myLists.length > 0 && (
-          <View style={s.savedSection}>
-            <Text style={s.sectionTitle}>My Lists</Text>
-            {myLists.slice(0, 3).map((list, i) => (
-              <TouchableOpacity
-                key={list.list_id}
-                testID={`saved-list-${i}`}
-                style={s.savedListCard}
-                onPress={() => router.push(`/shopping-list?listId=${list.list_id}`)}
-              >
-                <View style={s.savedListIcon}>
-                  <Ionicons name="document-text" size={20} color={colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.savedListName}>{list.name}</Text>
-                  <Text style={s.savedListCount}>{list.items?.length || 0} items</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+        {/* ── AD BANNERS — directly below shopping list ───────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🏷️ Deals & Promotions</Text>
+          <AdCarousel />
+        </View>
 
-        {/* Products Section */}
-        <View style={s.productsSection}>
-          <View style={s.productsSectionHeader}>
-            <Text style={s.sectionTitle}>Products</Text>
-            <TouchableOpacity
-              testID="add-product-photo-btn"
-              style={s.addPhotoBtn}
-              onPress={() => setShowAddProduct(true)}
-            >
-              <Ionicons name="camera" size={16} color={colors.primaryForeground} />
-              <Text style={s.addPhotoBtnText}>Add Photo</Text>
+        {/* ── Featured Products 2-row rolling ────────────────────────────── */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>⭐ Featured Products</Text>
+            <TouchableOpacity onPress={() => router.push('/compare')}>
+              <Text style={styles.seeAll}>See all</Text>
             </TouchableOpacity>
           </View>
-          {featuredProducts.length > 0 ? (
-            <View style={s.productsGrid}>
-              {featuredProducts.slice(0, 6).map((product, i) => (
-                <ProductCard
-                  key={product.product_id || product.id || i}
-                  testID={`product-card-${i}`}
-                  name={product.name}
-                  imageb64={product.image_b64}
-                  onPress={() => router.push(`/(tabs)/compare?product=${encodeURIComponent(product.name)}`)}
-                />
-              ))}
-            </View>
+          {featured.length > 0 ? (
+            <FeaturedCarousel
+              products={featured}
+              onFlag={id => handleFlag(id, 'product')}
+            />
           ) : (
-            <View style={s.emptyProducts}>
-              <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
-              <Text style={s.emptyProductsText}>No product photos yet</Text>
-              <Text style={s.emptyProductsHint}>Be the first to add one!</Text>
-            </View>
+            <Text style={styles.emptyText}>No featured products yet.</Text>
           )}
         </View>
 
-        {/* Product Image Picker Modal */}
-        <ProductImagePicker
-          visible={showAddProduct}
-          onClose={() => setShowAddProduct(false)}
-          onUploaded={(product) => {
-            setFeaturedProducts(prev => [product, ...prev.slice(0, 5)]);
-          }}
-        />
-
-        {/* Ad Banner */}
-        {banners.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} pagingEnabled style={s.bannerScroll}>
-            {banners.map((banner, i) => (
-              <TouchableOpacity
-                key={banner.banner_id}
-                testID={`ad-banner-${i}`}
-                style={[s.bannerCard, { backgroundColor: banner.bg_color }]}
-                activeOpacity={0.9}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.bannerLabel, { color: banner.text_color + '88' }]}>SPONSORED</Text>
-                  <Text style={[s.bannerTitle, { color: banner.text_color }]}>{banner.title}</Text>
-                  <Text style={[s.bannerSubtitle, { color: banner.text_color + 'CC' }]}>{banner.subtitle}</Text>
-                </View>
-                <View style={[s.bannerCta, { borderColor: banner.text_color + '55' }]}>
-                  <Text style={[s.bannerCtaText, { color: banner.text_color }]}>{banner.cta_text}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-
-        {/* Quick Actions — just the essentials */}
-        <Text style={s.sectionTitle}>Quick Actions</Text>
-        <View style={s.actionsGrid}>
-          {[
-            { icon: 'swap-horizontal', label: 'Compare Prices', color: colors.primary, route: '/(tabs)/compare' },
-            { icon: 'scan', label: 'Quick Scan', color: colors.secondary, route: '/(tabs)/scan' },
-          ].map((action, i) => (
-            <TouchableOpacity
-              key={i}
-              testID={`quick-action-${i}`}
-              style={s.actionCard}
-              onPress={() => router.push(action.route as any)}
-              activeOpacity={0.8}
-            >
-              <View style={[s.actionIcon, { backgroundColor: action.color + '18' }]}>
-                <Ionicons name={action.icon as any} size={26} color={action.color} />
-              </View>
-              <Text style={s.actionLabel}>{action.label}</Text>
+        {/* ── Recent Price Reports ────────────────────────────────────────── */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>📋 Recent Reports</Text>
+            <TouchableOpacity onPress={() => router.push('/compare')}>
+              <Text style={styles.seeAll}>See all</Text>
             </TouchableOpacity>
-          ))}
+          </View>
+          {reports.length > 0 ? (
+            reports.map(item => (
+              <ReportCard
+                key={item.id}
+                item={item}
+                onFlag={id => handleFlag(id, 'report')}
+              />
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No price reports yet. Be the first!</Text>
+          )}
         </View>
-
-        {/* Recent Price Updates — compact */}
-        {recentReports.length > 0 && (
-          <>
-            <Text style={s.sectionTitle}>Recent Updates</Text>
-            {recentReports.map((report, i) => (
-              <View key={i} style={s.reportRow} testID={`recent-report-${i}`}>
-                <View style={s.reportDot} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.reportProduct}>{report.product_name}</Text>
-                  <Text style={s.reportStore}>{report.store_name}</Text>
-                </View>
-                <Text style={s.reportPrice}>${report.price?.toFixed(2)}</Text>
-                <TouchableOpacity
-                  testID={`flag-report-${i}`}
-                  style={s.flagBtn}
-                  onPress={() => flagItem('report', report.report_id)}
-                >
-                  <Ionicons
-                    name={report.is_outdated ? 'flag' : 'flag-outline'}
-                    size={16}
-                    color={report.is_outdated ? colors.warning : colors.textSecondary}
-                  />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scrollContent: { padding: Spacing.m, paddingBottom: Spacing.xxl },
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  safe:          { flex: 1, backgroundColor: C.bg },
+  scroll:        { flex: 1 },
+  content:       { paddingTop: 8 },
+  loadingScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg },
 
   // Header
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.l },
-  greeting: { fontSize: 26, fontWeight: '800', color: colors.text, letterSpacing: -0.5 },
-  subGreeting: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
-  statsRow: { flexDirection: 'row', gap: 8 },
-  statBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: colors.accent + '15', paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: Radius.full,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  statText: { fontSize: 12, fontWeight: '700', color: colors.accent },
+  greeting:      { fontSize: 18, fontWeight: '700', color: C.text },
+  headerSub:     { fontSize: 12, color: C.textSec, marginTop: 2 },
+  compareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    gap: 6,
+  },
+  compareBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
 
-  // CTA
-  ctaCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.primary, borderRadius: Radius.xl,
-    padding: Spacing.l, gap: Spacing.m, marginBottom: Spacing.l,
-    shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3, shadowRadius: 20, elevation: 8,
-  },
-  ctaIconWrap: {
-    width: 56, height: 56, borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  ctaTextWrap: { flex: 1 },
-  ctaTitle: { fontSize: 20, fontWeight: '800', color: colors.primaryForeground },
-  ctaDesc: { fontSize: 13, color: colors.primaryForeground + 'CC', marginTop: 2 },
+  // Sections
+  section:       { paddingHorizontal: 16, marginBottom: 20 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  sectionTitle:  { fontSize: 16, fontWeight: '700', color: C.text },
+  seeAll:        { fontSize: 13, color: C.primary, fontWeight: '600' },
+  emptyText:     { fontSize: 13, color: C.textSec, textAlign: 'center', paddingVertical: 16 },
 
-  // Saved lists
-  savedSection: { marginBottom: Spacing.l },
-  savedListCard: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
-    backgroundColor: colors.surface, borderRadius: Radius.l,
-    padding: Spacing.m, marginBottom: Spacing.s,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+  // Ads
+  adContainer:   { marginBottom: 4 },
+  adCard: {
+    height: 110,
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
   },
-  savedListIcon: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: colors.primary + '15', justifyContent: 'center', alignItems: 'center',
+  adTextBlock:  { flex: 1, gap: 3 },
+  adTitle:      { fontSize: 16, fontWeight: '800', color: '#FFF' },
+  adSubtitle:   { fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+  adCta: {
+    marginTop: 8,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 99,
   },
-  savedListName: { fontSize: 15, fontWeight: '600', color: colors.text },
-  savedListCount: { fontSize: 12, color: colors.textSecondary },
+  adCtaText:    { color: '#FFF', fontSize: 12, fontWeight: '700' },
+  adEmoji:      { fontSize: 36, marginLeft: 12 },
+  adDots:       { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 },
+  dot:          { width: 6, height: 6, borderRadius: 3, backgroundColor: C.border },
+  dotActive:    { backgroundColor: C.primary, width: 14 },
 
-  // Section
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: Spacing.m },
+  // Featured (2-row carousel)
+  featScroll:   { paddingRight: 8 },
+  featRows:     { gap: 10 },
+  featRow:      { flexDirection: 'row', gap: 10 },
+  featCard: {
+    width: 148,
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  featImage:          { width: '100%', height: 96 },
+  featPlaceholder: {
+    width: '100%',
+    height: 96,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featPlaceholderText: { fontSize: 22, fontWeight: '800', color: C.primary },
+  featInfo:            { padding: 8, gap: 2 },
+  featName:            { fontSize: 12, fontWeight: '700', color: C.text },
+  featPrice:           { fontSize: 14, fontWeight: '800', color: C.accentDark },
+  featStore:           { fontSize: 11, color: C.textSec },
+  featFlagBtn:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingBottom: 6, gap: 3 },
+  featFlagCount:       { fontSize: 10, color: C.error, fontWeight: '700' },
+  outdatedBadge: {
+    position: 'absolute', top: 6, left: 6,
+    backgroundColor: C.error, borderRadius: 4,
+    paddingHorizontal: 5, paddingVertical: 2,
+  },
+  outdatedText:   { color: '#FFF', fontSize: 8, fontWeight: '800' },
 
-  // Actions Grid
-  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.m, marginBottom: Spacing.l },
-  actionCard: {
-    width: '47%', backgroundColor: colors.surface, borderRadius: Radius.l,
-    padding: Spacing.m, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+  // Report cards
+  reportCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.surface,
+    borderRadius: 14,
+    marginBottom: 8,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  actionIcon: {
-    width: 52, height: 52, borderRadius: 14,
-    justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.s,
+  reportImageBox:     { width: 64, height: 64 },
+  reportImage:        { width: 64, height: 64 },
+  reportPlaceholder: {
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  actionLabel: { fontSize: 13, fontWeight: '600', color: colors.text, textAlign: 'center' },
+  reportPlaceholderText: { fontSize: 16, fontWeight: '800', color: C.primary },
+  reportInfo:            { flex: 1, paddingHorizontal: 10, gap: 2 },
+  reportName:            { fontSize: 14, fontWeight: '700', color: C.text },
+  reportStore:           { fontSize: 12, color: C.primary, fontWeight: '600' },
+  reportRegion:          { fontSize: 11, color: C.textSec },
+  reportRight:           { alignItems: 'flex-end', paddingRight: 12, gap: 3 },
+  reportPrice:           { fontSize: 15, fontWeight: '800', color: C.accentDark },
+  reportUnit:            { fontSize: 10, color: C.textSec },
+  flagButton:            { flexDirection: 'row', alignItems: 'center', gap: 3, padding: 4 },
+  flagCount:             { fontSize: 10, color: C.error, fontWeight: '700' },
+  outdatedBadgeSm: {
+    backgroundColor: C.error, borderRadius: 4,
+    paddingHorizontal: 4, paddingVertical: 1,
+  },
+  outdatedTextSm: { color: '#FFF', fontSize: 8, fontWeight: '800' },
 
-  // Recent reports
-  reportRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
-    paddingVertical: Spacing.s, borderBottomWidth: 1, borderBottomColor: colors.border,
+  // Shopping list
+  shoppingList: {
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  reportDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.secondary },
-  reportProduct: { fontSize: 14, fontWeight: '600', color: colors.text },
-  reportStore: { fontSize: 12, color: colors.textSecondary },
-  reportPrice: { fontSize: 16, fontWeight: '800', color: colors.primary },
-
-  // Banner
-  bannerScroll: { marginBottom: Spacing.l },
-  bannerCard: {
-    width: 300, borderRadius: Radius.l, padding: Spacing.m, marginRight: Spacing.m,
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.m,
+  shoppingInputRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  shoppingInput: {
+    flex: 1,
+    height: 44,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: C.text,
   },
-  bannerLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  bannerTitle: { fontSize: 16, fontWeight: '800', marginTop: 2 },
-  bannerSubtitle: { fontSize: 12, marginTop: 2 },
-  bannerCta: { borderWidth: 1.5, borderRadius: Radius.m, paddingHorizontal: 12, paddingVertical: 6 },
-  bannerCtaText: { fontSize: 12, fontWeight: '700' },
-  flagBtn: { padding: 8, marginLeft: 4 },
-
-  // Products Section
-  productsSection: { marginBottom: Spacing.l },
-  productsSectionHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.m,
+  shoppingAddBtn: {
+    width: 44, height: 44,
+    backgroundColor: C.primary,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  addPhotoBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: colors.primary, borderRadius: Radius.full,
-    paddingHorizontal: Spacing.m, paddingVertical: Spacing.s,
+  shoppingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    gap: 10,
   },
-  addPhotoBtnText: { fontSize: 13, fontWeight: '700', color: colors.primaryForeground },
-  productsGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between',
-  },
-  emptyProducts: {
-    alignItems: 'center', paddingVertical: Spacing.xl,
-    backgroundColor: colors.surface, borderRadius: Radius.l,
-  },
-  emptyProductsText: { fontSize: 16, fontWeight: '600', color: colors.textSecondary, marginTop: Spacing.s },
-  emptyProductsHint: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
+  shoppingCheckBox:   {},
+  shoppingItemText:   { flex: 1, fontSize: 14, color: C.text },
+  strikethrough:      { textDecorationLine: 'line-through', color: C.textSec },
+  emptyListText:      { fontSize: 13, color: C.textSec, textAlign: 'center', paddingVertical: 8 },
 });

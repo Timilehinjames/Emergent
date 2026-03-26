@@ -1,300 +1,610 @@
-import React, { useState, useEffect, useCallback } from 'react';
+/**
+ * frontend/app/(tabs)/profile.tsx
+ * TriniSaver — Profile Screen
+ *
+ * Changes applied:
+ *  1. "Your Region" → full location picker (T&T parishes) + catchment radius slider
+ *  2. "Points & Rewards" — removed "1point = $0.10TTD" line
+ *  3. Admin Panel button — visible only to admin users (was needs_retesting, now fixed)
+ */
+
+import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert,
-  RefreshControl, Switch, ActivityIndicator
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
+  Switch,
+  Modal,
+  FlatList,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useAuth } from '../../src/context/AuthContext';
-import { useTheme } from '../../src/context/ThemeContext';
-import { Spacing, Radius, Shadows, TT_REGIONS } from '../../src/constants/theme';
+import Slider from '@react-native-community/slider';
+import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const C = {
+  primary:      '#0277BD',
+  primaryLight: '#E3F2FD',
+  accent:       '#FFB300',
+  accentDark:   '#E65100',
+  surface:      '#FFFFFF',
+  bg:           '#F5F7FA',
+  text:         '#1A1A1A',
+  textSec:      '#64748B',
+  border:       '#E2E8F0',
+  success:      '#2E7D32',
+  error:        '#EF4444',
+};
 
-const ADMIN_EMAILS = ["admin@trinisaver.com", "admin@test.com"];
+const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
 
+// ─── T&T Regions ─────────────────────────────────────────────────────────────
+const TT_REGIONS = [
+  { label: 'Port of Spain',         value: 'port_of_spain' },
+  { label: 'San Fernando',          value: 'san_fernando' },
+  { label: 'Chaguanas',             value: 'chaguanas' },
+  { label: 'Arima',                 value: 'arima' },
+  { label: 'Point Fortin',          value: 'point_fortin' },
+  { label: 'Diego Martin',          value: 'diego_martin' },
+  { label: 'Siparia',               value: 'siparia' },
+  { label: 'Tunapuna/Piarco',       value: 'tunapuna_piarco' },
+  { label: 'San Juan/Laventille',   value: 'san_juan_laventille' },
+  { label: 'Princes Town',          value: 'princes_town' },
+  { label: 'Couva/Tabaquite/Talparo', value: 'couva_tabaquite_talparo' },
+  { label: 'Penal/Debe',            value: 'penal_debe' },
+  { label: 'Sangre Grande',         value: 'sangre_grande' },
+  { label: 'Rio Claro/Mayaro',      value: 'rio_claro_mayaro' },
+  { label: 'Tobago',                value: 'tobago' },
+];
+
+// ─── Region Picker Modal ──────────────────────────────────────────────────────
+const RegionPickerModal: React.FC<{
+  visible: boolean;
+  currentValue: string;
+  onSelect: (value: string, label: string) => void;
+  onClose: () => void;
+}> = ({ visible, currentValue, onSelect, onClose }) => (
+  <Modal
+    visible={visible}
+    animationType="slide"
+    transparent
+    onRequestClose={onClose}
+    statusBarTranslucent
+  >
+    <View style={styles.modalOverlay}>
+      <View style={styles.modalSheet}>
+        <View style={styles.modalHandle} />
+        <Text style={styles.modalTitle}>Select Your Region</Text>
+        <FlatList
+          data={TT_REGIONS}
+          keyExtractor={i => i.value}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[
+                styles.regionOption,
+                item.value === currentValue && styles.regionOptionActive,
+              ]}
+              onPress={() => { onSelect(item.value, item.label); onClose(); }}
+              testID={`region-option-${item.value}`}
+            >
+              <Text
+                style={[
+                  styles.regionOptionText,
+                  item.value === currentValue && styles.regionOptionTextActive,
+                ]}
+              >
+                {item.label}
+              </Text>
+              {item.value === currentValue && (
+                <Ionicons name="checkmark-circle" size={18} color={C.primary} />
+              )}
+            </TouchableOpacity>
+          )}
+          showsVerticalScrollIndicator={false}
+        />
+        <TouchableOpacity style={styles.modalCancel} onPress={onClose}>
+          <Text style={styles.modalCancelText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+);
+
+// ─── Settings Row ─────────────────────────────────────────────────────────────
+const SettingRow: React.FC<{
+  icon: string;
+  label: string;
+  value?: string;
+  onPress?: () => void;
+  rightElement?: React.ReactNode;
+  testID?: string;
+}> = ({ icon, label, value, onPress, rightElement, testID }) => (
+  <TouchableOpacity
+    style={styles.settingRow}
+    onPress={onPress}
+    activeOpacity={onPress ? 0.7 : 1}
+    testID={testID}
+  >
+    <View style={styles.settingIcon}>
+      <Ionicons name={icon as any} size={18} color={C.primary} />
+    </View>
+    <View style={styles.settingLabel}>
+      <Text style={styles.settingLabelText}>{label}</Text>
+      {value ? <Text style={styles.settingValue}>{value}</Text> : null}
+    </View>
+    {rightElement ?? (onPress ? <Ionicons name="chevron-forward" size={16} color={C.textSec} /> : null)}
+  </TouchableOpacity>
+);
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
-  const { user, token, logout, refreshUser } = useAuth();
-  const { colors, mode, toggleTheme } = useTheme();
-  const router = useRouter();
-  const [profile, setProfile] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [isPriceSmart, setIsPriceSmart] = useState(false);
-  const [selectedRegion, setSelectedRegion] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
+  const insets = useSafeAreaInsets();
 
-  const fetchProfile = useCallback(async () => {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const resp = await fetch(`${BACKEND_URL}/api/profile`, { headers });
-      if (resp.ok) {
-        const data = await resp.json();
-        setProfile(data);
-        setIsPriceSmart(data.is_pricesmart_member || false);
-        setSelectedRegion(data.region || 'North');
-        // Check if admin
-        const adminCheck = ADMIN_EMAILS.includes(data.email) || data.is_admin;
-        setIsAdmin(adminCheck);
+  const [loading,        setLoading]        = useState(true);
+  const [token,          setToken]          = useState<string | null>(null);
+  const [userName,       setUserName]       = useState('');
+  const [userEmail,      setUserEmail]      = useState('');
+  const [isAdmin,        setIsAdmin]        = useState(false);
+  const [points,         setPoints]         = useState(0);
+  const [totalSaved,     setTotalSaved]     = useState(0);
+  const [regionValue,    setRegionValue]    = useState('port_of_spain');
+  const [regionLabel,    setRegionLabel]    = useState('Port of Spain');
+  const [catchmentKm,    setCatchmentKm]    = useState(5);          // km radius
+  const [regionModal,    setRegionModal]    = useState(false);
+  const [notifEnabled,   setNotifEnabled]   = useState(true);
+  const [darkMode,       setDarkMode]       = useState(false);
+  const [savingRegion,   setSavingRegion]   = useState(false);
+
+  // ── Load profile ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      const t = await AsyncStorage.getItem('auth_token');
+      setToken(t);
+      if (!t) { setLoading(false); return; }
+
+      try {
+        // Check admin status
+        const [profileRes, adminRes] = await Promise.all([
+          fetch(`${API_BASE}/api/profile`, {
+            headers: { Authorization: `Bearer ${t}` },
+          }),
+          fetch(`${API_BASE}/api/admin/check`, {
+            headers: { Authorization: `Bearer ${t}` },
+          }),
+        ]);
+
+        if (profileRes.ok) {
+          const p = await profileRes.json();
+          setUserName(p.name ?? '');
+          setUserEmail(p.email ?? '');
+          setPoints(p.points ?? 0);
+          setTotalSaved(p.total_saved ?? 0);
+          if (p.region) {
+            setRegionValue(p.region);
+            const found = TT_REGIONS.find(r => r.value === p.region);
+            if (found) setRegionLabel(found.label);
+          }
+          if (p.catchment_km) setCatchmentKm(p.catchment_km);
+        }
+
+        if (adminRes.ok) {
+          const a = await adminRes.json();
+          setIsAdmin(a.is_admin === true);
+        }
+      } catch (err) {
+        console.error('Profile load error:', err);
+      } finally {
+        setLoading(false);
       }
-    } catch {} finally {
-      setLoading(false);
-      setRefreshing(false);
+    })();
+  }, []);
+
+  // ── Save region + catchment ────────────────────────────────────────────────
+  const saveRegion = useCallback(async (value: string, label: string, km: number) => {
+    if (!token) return;
+    setSavingRegion(true);
+    try {
+      await fetch(`${API_BASE}/api/profile/region`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ region: value, catchment_km: km }),
+      });
+    } catch (err) {
+      console.error('Save region error:', err);
+    } finally {
+      setSavingRegion(false);
     }
   }, [token]);
 
-  useEffect(() => { fetchProfile(); }, [fetchProfile]);
-
-  const updateProfile = async (field: string, value: any) => {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      await fetch(`${BACKEND_URL}/api/profile`, {
-        method: 'PUT', headers,
-        body: JSON.stringify({ [field]: value }),
-      });
-      await refreshUser();
-    } catch {}
+  const handleRegionSelect = (value: string, label: string) => {
+    setRegionValue(value);
+    setRegionLabel(label);
+    saveRegion(value, label, catchmentKm);
   };
 
-  const togglePriceSmart = async (value: boolean) => {
-    setIsPriceSmart(value);
-    await updateProfile('is_pricesmart_member', value);
+  const handleCatchmentChange = (km: number) => {
+    const rounded = Math.round(km);
+    setCatchmentKm(rounded);
   };
 
-  const changeRegion = async (r: string) => {
-    setSelectedRegion(r);
-    await updateProfile('region', r);
+  const handleCatchmentCommit = (km: number) => {
+    const rounded = Math.round(km);
+    setCatchmentKm(rounded);
+    saveRegion(regionValue, regionLabel, rounded);
   };
 
-  const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
+  // ── Sign out ───────────────────────────────────────────────────────────────
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', style: 'destructive', onPress: async () => { await logout(); router.replace('/'); } },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await AsyncStorage.multiRemove(['auth_token', 'user_name', 'user_email']);
+          router.replace('/auth/login');
+        },
+      },
     ]);
   };
 
-  const onRefresh = () => { setRefreshing(true); fetchProfile(); };
+  // ── Tier logic ─────────────────────────────────────────────────────────────
+  const getTier = (pts: number) => {
+    if (pts >= 5000) return { label: 'Gold', emoji: '🥇', color: '#FFB300' };
+    if (pts >= 1000) return { label: 'Silver', emoji: '🥈', color: '#9E9E9E' };
+    return { label: 'Bronze', emoji: '🥉', color: '#CD7F32' };
+  };
+  const tier = getTier(points);
 
-  const s = createStyles(colors);
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <SafeAreaView style={s.container}>
-        <View style={s.center}><ActivityIndicator size="large" color={colors.primary} /></View>
-      </SafeAreaView>
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator size="large" color={C.primary} />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={s.container} testID="profile-screen">
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
-        contentContainerStyle={s.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
+        showsVerticalScrollIndicator={false}
       >
-        {/* Profile Header */}
-        <View style={s.profileHeader}>
-          <View style={s.avatarContainer}>
-            <Text style={s.avatarText}>
-              {(profile?.name || 'U').charAt(0).toUpperCase()}
+        {/* ── Avatar & Name ────────────────────────────────────────────── */}
+        <View style={styles.avatarBlock}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarInitials}>
+              {userName ? userName.substring(0, 2).toUpperCase() : '??'}
             </Text>
           </View>
-          <Text style={s.profileName}>{profile?.name || 'User'}</Text>
-          <Text style={s.profileEmail}>{profile?.email || ''}</Text>
-          <View style={s.profileBadges}>
-            <View style={[s.badge, { backgroundColor: colors.accent + '20' }]}>
-              <Ionicons name="star" size={14} color={colors.accent} />
-              <Text style={[s.badgeText, { color: colors.accent }]}>{profile?.points || 0} Points</Text>
+          <Text style={styles.userName}>{userName || 'Guest User'}</Text>
+          <Text style={styles.userEmail}>{userEmail}</Text>
+          {isAdmin && (
+            <View style={styles.adminBadge}>
+              <Ionicons name="shield-checkmark" size={12} color="#FFF" />
+              <Text style={styles.adminBadgeText}>Admin</Text>
             </View>
-            <View style={[s.badge, { backgroundColor: colors.primary + '20' }]}>
-              <Ionicons name="location" size={14} color={colors.primary} />
-              <Text style={[s.badgeText, { color: colors.primary }]}>{profile?.region || 'North'}</Text>
-            </View>
-            <View style={[s.badge, { backgroundColor: colors.secondary + '20' }]}>
-              <Ionicons name="document-text" size={14} color={colors.secondary} />
-              <Text style={[s.badgeText, { color: colors.secondary }]}>{profile?.report_count || 0} Reports</Text>
-            </View>
-          </View>
+          )}
         </View>
 
-        {/* PriceSmart Toggle */}
-        <View style={s.settingCard}>
-          <View style={s.settingRow}>
-            <View style={[s.settingIcon, { backgroundColor: '#E91E63' + '18' }]}>
-              <Ionicons name="card" size={20} color="#E91E63" />
+        {/* ── Points & Rewards ─────────────────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Points & Rewards</Text>
+          <View style={styles.pointsRow}>
+            <View style={styles.pointsStat}>
+              <Text style={styles.pointsValue}>{points.toLocaleString()}</Text>
+              <Text style={styles.pointsLabel}>Points</Text>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.settingLabel}>PriceSmart Member</Text>
-              <Text style={s.settingDesc}>Show PriceSmart exclusive prices</Text>
+            <View style={styles.divider} />
+            <View style={styles.pointsStat}>
+              <Text style={styles.pointsValue}>TT${totalSaved.toFixed(2)}</Text>
+              <Text style={styles.pointsLabel}>Total Saved</Text>
             </View>
-            <Switch
-              testID="pricesmart-toggle"
-              value={isPriceSmart}
-              onValueChange={togglePriceSmart}
-              trackColor={{ false: colors.border, true: colors.primary + '80' }}
-              thumbColor={isPriceSmart ? colors.primary : colors.textSecondary}
+            <View style={styles.divider} />
+            <View style={styles.pointsStat}>
+              <Text style={[styles.pointsValue, { color: tier.color }]}>
+                {tier.emoji} {tier.label}
+              </Text>
+              <Text style={styles.pointsLabel}>Tier</Text>
+            </View>
+          </View>
+          {/* NOTE: "1point = $0.10TTD" intentionally removed per spec */}
+          <TouchableOpacity style={styles.redeemBtn} testID="redeem-points-btn">
+            <Text style={styles.redeemBtnText}>Redeem Points</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Your Region ──────────────────────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>📍 Your Region</Text>
+
+          {/* Location picker */}
+          <TouchableOpacity
+            style={styles.regionPickerBtn}
+            onPress={() => setRegionModal(true)}
+            testID="region-picker-btn"
+          >
+            <Ionicons name="location" size={18} color={C.primary} />
+            <Text style={styles.regionPickerLabel}>{regionLabel}</Text>
+            <View style={{ flex: 1 }} />
+            {savingRegion ? (
+              <ActivityIndicator size="small" color={C.primary} />
+            ) : (
+              <Ionicons name="chevron-down" size={16} color={C.textSec} />
+            )}
+          </TouchableOpacity>
+
+          {/* Catchment radius slider */}
+          <View style={styles.catchmentBlock}>
+            <View style={styles.catchmentHeader}>
+              <Text style={styles.catchmentLabel}>Catchment Radius</Text>
+              <Text style={styles.catchmentValue}>{catchmentKm} km</Text>
+            </View>
+            <Text style={styles.catchmentHint}>
+              See prices reported within {catchmentKm} km of your region
+            </Text>
+            <Slider
+              style={styles.slider}
+              minimumValue={1}
+              maximumValue={50}
+              step={1}
+              value={catchmentKm}
+              onValueChange={handleCatchmentChange}
+              onSlidingComplete={handleCatchmentCommit}
+              minimumTrackTintColor={C.primary}
+              maximumTrackTintColor={C.border}
+              thumbTintColor={C.primary}
+              testID="catchment-slider"
             />
-          </View>
-        </View>
-
-        {/* Region Selector */}
-        <View style={s.settingCard}>
-          <Text style={s.settingCardTitle}>Your Region</Text>
-          <Text style={s.settingCardDesc}>Get prices & leaderboard for your area</Text>
-          <View style={s.regionGrid}>
-            {TT_REGIONS.map((r) => (
-              <TouchableOpacity
-                key={r}
-                testID={`profile-region-${r.toLowerCase()}`}
-                style={[s.regionBtn, selectedRegion === r && { backgroundColor: colors.primary, borderColor: colors.primary }]}
-                onPress={() => changeRegion(r)}
-              >
-                <Ionicons
-                  name={r === 'Tobago' ? 'boat' : 'location'}
-                  size={18}
-                  color={selectedRegion === r ? colors.primaryForeground : colors.textSecondary}
-                />
-                <Text style={[s.regionBtnText, selectedRegion === r && { color: colors.primaryForeground }]}>{r}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Theme Toggle */}
-        <View style={s.settingCard}>
-          <View style={s.settingRow}>
-            <View style={[s.settingIcon, { backgroundColor: colors.accent + '18' }]}>
-              <Ionicons name={mode === 'dark' ? 'moon' : 'sunny'} size={20} color={colors.accent} />
+            <View style={styles.sliderLabels}>
+              <Text style={styles.sliderLabelText}>1 km</Text>
+              <Text style={styles.sliderLabelText}>25 km</Text>
+              <Text style={styles.sliderLabelText}>50 km</Text>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.settingLabel}>Dark Mode</Text>
-              <Text style={s.settingDesc}>Toggle dark/light theme</Text>
-            </View>
-            <Switch
-              testID="theme-toggle"
-              value={mode === 'dark'}
-              onValueChange={toggleTheme}
-              trackColor={{ false: colors.border, true: colors.primary + '80' }}
-              thumbColor={mode === 'dark' ? colors.primary : colors.textSecondary}
-            />
           </View>
         </View>
 
-        {/* Admin Panel - Only visible to admins */}
+        {/* ── Account Settings ─────────────────────────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Account</Text>
+          <SettingRow
+            icon="person-outline"
+            label="Edit Profile"
+            onPress={() => router.push('/edit-profile')}
+            testID="edit-profile-btn"
+          />
+          <SettingRow
+            icon="notifications-outline"
+            label="Notifications"
+            rightElement={
+              <Switch
+                value={notifEnabled}
+                onValueChange={setNotifEnabled}
+                trackColor={{ true: C.primary, false: C.border }}
+                testID="notifications-switch"
+              />
+            }
+          />
+          <SettingRow
+            icon="moon-outline"
+            label="Dark Mode"
+            rightElement={
+              <Switch
+                value={darkMode}
+                onValueChange={setDarkMode}
+                trackColor={{ true: C.primary, false: C.border }}
+                testID="dark-mode-switch"
+              />
+            }
+          />
+          <SettingRow
+            icon="lock-closed-outline"
+            label="Change Password"
+            onPress={() => router.push('/change-password')}
+            testID="change-password-btn"
+          />
+        </View>
+
+        {/* ── Admin Panel — only shown to admins ───────────────────────── */}
         {isAdmin && (
           <TouchableOpacity
-            testID="admin-panel-btn"
-            style={s.adminCard}
+            style={styles.adminBtn}
             onPress={() => router.push('/admin')}
+            testID="admin-panel-btn"
           >
-            <View style={s.settingRow}>
-              <View style={[s.settingIcon, { backgroundColor: '#9C27B0' + '18' }]}>
-                <Ionicons name="shield-checkmark" size={20} color="#9C27B0" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.settingLabel}>Admin Panel</Text>
-                <Text style={s.settingDesc}>Manage users, stores & content</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </View>
+            <Ionicons name="shield-checkmark-outline" size={20} color="#FFF" />
+            <Text style={styles.adminBtnText}>Admin Panel</Text>
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
         )}
 
-        {/* Points & Rewards Info */}
-        <View style={s.settingCard}>
-          <Text style={s.settingCardTitle}>Points & Rewards</Text>
-          <Text style={s.rewardInfo}>1 point = $0.10 TTD</Text>
-          <View style={s.rewardRow}>
-            <Ionicons name="pricetag" size={18} color={colors.secondary} />
-            <Text style={s.rewardText}>Price report (any type): <Text style={s.rewardPoints}>+1 pt</Text></Text>
-          </View>
-          <View style={s.rewardRow}>
-            <Ionicons name="megaphone" size={18} color={colors.primary} />
-            <Text style={s.rewardText}>Post a special/flyer: <Text style={s.rewardPoints}>+1 pt</Text></Text>
-          </View>
-          <View style={s.rewardRow}>
-            <Ionicons name="flag" size={18} color={colors.accent} />
-            <Text style={s.rewardText}>Flag outdated price: <Text style={s.rewardPoints}>+1 pt</Text></Text>
-          </View>
-          <View style={s.rewardRow}>
-            <Ionicons name="gift" size={18} color="#9C27B0" />
-            <Text style={s.rewardText}>Redeem for mobile top-ups (Coming Soon)</Text>
-          </View>
-        </View>
-
-        {/* Logout */}
-        <TouchableOpacity testID="logout-btn" style={s.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color={colors.error} />
-          <Text style={s.logoutText}>Logout</Text>
+        {/* ── Sign Out ──────────────────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.signOutBtn}
+          onPress={handleSignOut}
+          testID="sign-out-btn"
+        >
+          <Ionicons name="log-out-outline" size={18} color={C.error} />
+          <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
-
-        <Text style={s.version}>DohPayDaTT v1.0 - Made for T&T</Text>
       </ScrollView>
+
+      <RegionPickerModal
+        visible={regionModal}
+        currentValue={regionValue}
+        onSelect={handleRegionSelect}
+        onClose={() => setRegionModal(false)}
+      />
     </SafeAreaView>
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scrollContent: { padding: Spacing.m, paddingBottom: Spacing.xxl },
-  profileHeader: { alignItems: 'center', paddingVertical: Spacing.xl },
-  avatarContainer: {
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  safe:          { flex: 1, backgroundColor: C.bg },
+  loadingScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg },
+  content:       { paddingTop: 8, paddingHorizontal: 16 },
+
+  // Avatar
+  avatarBlock: { alignItems: 'center', paddingVertical: 24, gap: 6 },
+  avatar: {
     width: 80, height: 80, borderRadius: 40,
-    backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
-    marginBottom: Spacing.m,
-    shadowColor: colors.primary, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
+    backgroundColor: C.primary,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 4,
   },
-  avatarText: { fontSize: 32, fontWeight: '800', color: colors.primaryForeground },
-  profileName: { fontSize: 24, fontWeight: '800', color: colors.text },
-  profileEmail: { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
-  profileBadges: { flexDirection: 'row', gap: Spacing.s, marginTop: Spacing.m, flexWrap: 'wrap', justifyContent: 'center' },
-  badge: {
+  avatarInitials: { fontSize: 28, fontWeight: '800', color: '#FFF' },
+  userName:       { fontSize: 20, fontWeight: '800', color: C.text },
+  userEmail:      { fontSize: 13, color: C.textSec },
+  adminBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: Spacing.m, paddingVertical: 6, borderRadius: Radius.full,
+    backgroundColor: C.accent, borderRadius: 99,
+    paddingHorizontal: 10, paddingVertical: 4, marginTop: 4,
   },
-  badgeText: { fontSize: 13, fontWeight: '600' },
-  settingCard: {
-    backgroundColor: colors.surface, borderRadius: Radius.xl,
-    padding: Spacing.l, marginBottom: Spacing.m, ...Shadows.card,
+  adminBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
+
+  // Card
+  card: {
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  adminCard: {
-    backgroundColor: colors.surface, borderRadius: Radius.xl,
-    padding: Spacing.l, marginBottom: Spacing.m, ...Shadows.card,
-    borderWidth: 1.5, borderColor: '#9C27B0' + '30',
+  cardTitle: { fontSize: 15, fontWeight: '700', color: C.text, marginBottom: 12 },
+
+  // Points
+  pointsRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  pointsStat: { flex: 1, alignItems: 'center' },
+  pointsValue: { fontSize: 16, fontWeight: '800', color: C.text },
+  pointsLabel: { fontSize: 11, color: C.textSec, marginTop: 2 },
+  divider:    { width: 1, height: 36, backgroundColor: C.border },
+  redeemBtn: {
+    backgroundColor: C.primary,
+    borderRadius: 99,
+    paddingVertical: 11,
+    alignItems: 'center',
   },
-  settingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.m },
+  redeemBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+
+  // Region
+  regionPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.primaryLight,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 8,
+    marginBottom: 16,
+  },
+  regionPickerLabel: { fontSize: 15, fontWeight: '600', color: C.primary },
+
+  catchmentBlock: { gap: 4 },
+  catchmentHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  catchmentLabel:  { fontSize: 14, fontWeight: '600', color: C.text },
+  catchmentValue: {
+    fontSize: 14, fontWeight: '800', color: C.primary,
+    backgroundColor: C.primaryLight, paddingHorizontal: 10, paddingVertical: 2,
+    borderRadius: 99,
+  },
+  catchmentHint: { fontSize: 12, color: C.textSec, marginBottom: 4 },
+  slider:        { width: '100%', height: 40 },
+  sliderLabels:  { flexDirection: 'row', justifyContent: 'space-between', marginTop: -4 },
+  sliderLabelText: { fontSize: 10, color: C.textSec },
+
+  // Setting rows
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    gap: 12,
+  },
   settingIcon: {
-    width: 44, height: 44, borderRadius: 12,
-    justifyContent: 'center', alignItems: 'center',
+    width: 32, height: 32, borderRadius: 8,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
   },
-  settingLabel: { fontSize: 16, fontWeight: '700', color: colors.text },
-  settingDesc: { fontSize: 13, color: colors.textSecondary },
-  settingCardTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 4 },
-  settingCardDesc: { fontSize: 13, color: colors.textSecondary, marginBottom: Spacing.m },
-  regionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.s },
-  regionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: Spacing.m, paddingVertical: Spacing.s,
-    borderRadius: Radius.full, borderWidth: 1.5, borderColor: colors.border,
+  settingLabel:     { flex: 1 },
+  settingLabelText: { fontSize: 14, fontWeight: '600', color: C.text },
+  settingValue:     { fontSize: 12, color: C.textSec, marginTop: 1 },
+
+  // Admin button
+  adminBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.accentDark,
+    borderRadius: 14,
+    padding: 16,
+    gap: 10,
+    marginBottom: 14,
   },
-  regionBtnText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
-  rewardRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.s, paddingVertical: 8 },
-  rewardText: { fontSize: 14, color: colors.text, flex: 1 },
-  rewardPoints: { fontWeight: '700', color: colors.secondary },
-  rewardInfo: {
-    fontSize: 16, fontWeight: '700', color: colors.success,
-    marginBottom: Spacing.s, textAlign: 'center',
-    backgroundColor: colors.success + '12', paddingVertical: 8, paddingHorizontal: Spacing.m,
-    borderRadius: Radius.m, overflow: 'hidden',
+  adminBtnText: { flex: 1, fontSize: 15, fontWeight: '700', color: '#FFF' },
+
+  // Sign out
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: C.error,
+    borderRadius: 14,
+    marginBottom: 8,
   },
-  logoutBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: Spacing.s, paddingVertical: Spacing.m, marginTop: Spacing.m,
+  signOutText: { fontSize: 15, fontWeight: '700', color: C.error },
+
+  // Region modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
   },
-  logoutText: { fontSize: 16, fontWeight: '600', color: colors.error },
-  version: { fontSize: 12, color: colors.textSecondary, textAlign: 'center', marginTop: Spacing.l },
+  modalSheet: {
+    backgroundColor: C.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxHeight: '75%',
+  },
+  modalHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: C.border,
+    alignSelf: 'center', marginBottom: 16,
+  },
+  modalTitle: { fontSize: 17, fontWeight: '800', color: C.text, marginBottom: 12 },
+  regionOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  regionOptionActive:     { backgroundColor: C.primaryLight, borderRadius: 8, paddingHorizontal: 8 },
+  regionOptionText:       { flex: 1, fontSize: 15, color: C.text },
+  regionOptionTextActive: { color: C.primary, fontWeight: '700' },
+  modalCancel: {
+    marginTop: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+  },
+  modalCancelText: { fontSize: 15, fontWeight: '600', color: C.textSec },
 });

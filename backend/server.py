@@ -1,3 +1,6 @@
+import base64
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Form
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -29,6 +32,10 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 7
 
 app = FastAPI()
+UPLOAD_DIR = Path("uploads/product_images")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -62,6 +69,7 @@ class ProfileUpdate(BaseModel):
     is_pricesmart_member: Optional[bool] = None
 
 class PriceReportCreate(BaseModel):
+    image_data: Optional[str] = None
     product_name: str
     store_name: str
     price: float

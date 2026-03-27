@@ -137,10 +137,10 @@ export default function CompareScreen() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
       
-      const resp = await fetch(`${BACKEND_URL}/api/scan/shelf-tag`, {
+      const resp = await fetch(`${BACKEND_URL}/api/scan-price-tag`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ image_base64: scannedImage }),
+        body: JSON.stringify({ image: scannedImage }),
       });
       
       if (resp.ok) {
@@ -307,14 +307,19 @@ export default function CompareScreen() {
           <Text style={s.title}>Price Compare</Text>
           <Text style={s.subtitle}>Compare unit prices across T&T stores</Text>
 
-          {/* Scan to Compare Button */}
+          {/* Tap to Compare - Price Tag Scanner */}
           <TouchableOpacity
             testID="scan-compare-btn"
-            style={s.scanCompareBtn}
+            style={s.tapToCompareBtn}
             onPress={() => setShowScanModal(true)}
           >
-            <Ionicons name="camera" size={22} color={colors.primaryForeground} />
-            <Text style={s.scanCompareBtnText}>Scan Price Tag to Compare</Text>
+            <View style={s.tapToCompareIcon}>
+              <Ionicons name="scan" size={28} color="#fff" />
+            </View>
+            <View style={s.tapToCompareTextContainer}>
+              <Text style={s.tapToCompareBtnText}>Tap to Compare</Text>
+              <Text style={s.tapToCompareSubtext}>Scan a price tag to compare with community prices</Text>
+            </View>
           </TouchableOpacity>
 
           {/* Toggle: Compare vs Trip */}
@@ -962,6 +967,33 @@ const createStyles = (colors: any) => StyleSheet.create({
     justifyContent: 'center', gap: Spacing.s, marginBottom: Spacing.l,
   },
   scanCompareBtnText: { fontSize: 15, fontWeight: '700', color: colors.primaryForeground },
+  
+  // Tap to Compare prominent button
+  tapToCompareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a2e',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: Spacing.l,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  tapToCompareIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: '#E63946',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tapToCompareTextContainer: { flex: 1 },
+  tapToCompareBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  tapToCompareSubtext: { color: 'rgba(255,255,255,0.65)', fontSize: 12, marginTop: 2 },
   scanModalContent: {
     backgroundColor: colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
     padding: Spacing.l, maxHeight: '90%',

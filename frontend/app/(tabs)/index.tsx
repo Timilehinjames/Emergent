@@ -26,11 +26,14 @@ import {
   Animated,
   TextInput,
   Platform,
+  Modal,
+  ActionSheetIOS,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -416,6 +419,12 @@ export default function HomeScreen() {
   const [loading,      setLoading]      = useState(true);
   const [refreshing,   setRefreshing]   = useState(false);
   const [shoppingList, setShoppingList] = useState<ShoppingListItem[]>([]);
+  
+  // Capture Your Item states
+  const [captureModalVisible, setCaptureModalVisible] = useState(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [detectedItem, setDetectedItem] = useState<string | null>(null);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -542,6 +551,122 @@ export default function HomeScreen() {
     setShoppingList(prev => prev.filter(i => i.id !== id));
   }, []);
 
+  // ── Capture Your Item handlers ───────────────────────────────────────────
+  const handleTakePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Camera access is needed to capture your items.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setCapturedImage(result.assets[0].uri);
+      setCaptureModalVisible(true);
+      await analyzeItemImage(result.assets[0].base64 || '');
+    }
+  };
+
+  const handlePickFromGallery = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Gallery access is needed to pick your item images.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setCapturedImage(result.assets[0].uri);
+      setCaptureModalVisible(true);
+      await analyzeItemImage(result.assets[0].base64 || '');
+    }
+  };
+
+  const analyzeItemImage = async (base64Image: string) => {
+    setIsAnalyzing(true);
+    setDetectedItem(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/identify-item`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ image: base64Image }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setDetectedItem(data.item_name || '');
+      } else {
+        setDetectedItem('');
+      }
+    } catch {
+      setDetectedItem('');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleAddToShoppingList = () => {
+    if (isAnalyzing) {
+      Alert.alert('Still Analyzing', 'Please wait while we identify your item.');
+      return;
+    }
+
+    const itemName = detectedItem?.trim();
+    if (!itemName) {
+      Alert.alert('Item Name Required', 'Please enter the name of the item to add to your list.');
+      return;
+    }
+
+    addToList(itemName);
+    setCaptureModalVisible(false);
+    setCapturedImage(null);
+    setDetectedItem(null);
+    Alert.alert('✅ Added!', `"${itemName}" has been added to your shopping list.`);
+  };
+
+  const handleCaptureOption = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', '📷 Take Photo', '🖼️ Choose from Gallery'],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) handleTakePhoto();
+          if (buttonIndex === 2) handlePickFromGallery();
+        }
+      );
+    } else {
+      Alert.alert(
+        'Capture Your Item',
+        'How would you like to add your item?',
+        [
+          { text: '📷 Take Photo', onPress: handleTakePhoto },
+          { text: '🖼️ Choose from Gallery', onPress: handlePickFromGallery },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -565,18 +690,30 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Good day, {userName} 👋</Text>
-            <Text style={styles.headerSub}>TriniSaver — Smart Shopping</Text>
+            <Text style={styles.headerSub}>DohPayDaTT — Smart Shopping</Text>
           </View>
           <TouchableOpacity
             style={styles.compareBtn}
-            onPress={() => router.push('/scan')}
+            onPress={() => router.push('/(tabs)/compare')}
             testID="tap-to-compare-btn"
           >
-            {/* CHANGED: was "Scan Price Tag to Compare" */}
-            <Ionicons name="camera-outline" size={18} color="#FFF" />
-            <Text style={styles.compareBtnText}>Tap to Compare</Text>
+            <Ionicons name="pricetag-outline" size={18} color="#FFF" />
+            <Text style={styles.compareBtnText}>Compare</Text>
           </TouchableOpacity>
         </View>
+
+        {/* ── Capture Your Item Button ──────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.captureButton}
+          onPress={handleCaptureOption}
+          testID="capture-item-btn"
+        >
+          <Text style={styles.captureButtonIcon}>📷</Text>
+          <View>
+            <Text style={styles.captureButtonText}>Capture Your Item</Text>
+            <Text style={styles.captureButtonSubtext}>Add items to your shopping list with AI</Text>
+          </View>
+        </TouchableOpacity>
 
         {/* ── Shopping List ───────────────────────────────────────────────── */}
         <View style={styles.section}>
@@ -634,6 +771,60 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* ── Capture Modal ───────────────────────────────────────────────────── */}
+      <Modal
+        visible={captureModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setCaptureModalVisible(false)}
+      >
+        <View style={styles.captureModal}>
+          <View style={styles.captureModalHeader}>
+            <Text style={styles.captureModalTitle}>Add to Shopping List</Text>
+            <TouchableOpacity onPress={() => setCaptureModalVisible(false)}>
+              <Text style={styles.captureModalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {capturedImage && (
+            <Image
+              source={{ uri: capturedImage }}
+              style={styles.capturedImagePreview}
+              resizeMode="cover"
+            />
+          )}
+
+          {isAnalyzing ? (
+            <View style={styles.analyzingContainer}>
+              <ActivityIndicator size="large" color="#E63946" />
+              <Text style={styles.analyzingText}>Identifying item with AI...</Text>
+            </View>
+          ) : (
+            <View style={styles.itemNameContainer}>
+              <Text style={styles.itemNameLabel}>Item Name</Text>
+              <TextInput
+                style={styles.itemNameInput}
+                value={detectedItem ?? ''}
+                onChangeText={setDetectedItem}
+                placeholder="e.g. Anchor Butter 500g"
+                placeholderTextColor="#999"
+              />
+              {detectedItem && detectedItem.length > 0 && (
+                <Text style={styles.detectedLabel}>✨ AI detected — you can edit this</Text>
+              )}
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.addToListButton, isAnalyzing && styles.addToListButtonDisabled]}
+            onPress={handleAddToShoppingList}
+            disabled={isAnalyzing}
+          >
+            <Text style={styles.addToListButtonText}>+ Add to Shopping List</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -815,4 +1006,66 @@ const styles = StyleSheet.create({
   shoppingItemText:   { flex: 1, fontSize: 14, color: C.text },
   strikethrough:      { textDecorationLine: 'line-through', color: C.textSec },
   emptyListText:      { fontSize: 13, color: C.textSec, textAlign: 'center', paddingVertical: 8 },
+
+  // Capture Your Item
+  captureButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E63946',
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    gap: 14,
+    shadowColor: '#E63946',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  captureButtonIcon: { fontSize: 28 },
+  captureButtonText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  captureButtonSubtext: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 },
+
+  // Capture Modal
+  captureModal: { flex: 1, backgroundColor: '#fff', padding: 20 },
+  captureModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingTop: Platform.OS === 'ios' ? 40 : 0,
+  },
+  captureModalTitle: { fontSize: 20, fontWeight: '700', color: '#1a1a2e' },
+  captureModalClose: { fontSize: 24, color: '#666', padding: 4 },
+  capturedImagePreview: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    marginBottom: 20,
+    backgroundColor: '#f0f0f0',
+  },
+  analyzingContainer: { alignItems: 'center', paddingVertical: 24 },
+  analyzingText: { marginTop: 12, fontSize: 15, color: '#666' },
+  itemNameContainer: { marginBottom: 24 },
+  itemNameLabel: { fontSize: 14, fontWeight: '600', color: '#444', marginBottom: 8 },
+  itemNameInput: {
+    borderWidth: 1.5,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    padding: 14,
+    fontSize: 16,
+    color: '#1a1a2e',
+    backgroundColor: '#fafafa',
+  },
+  detectedLabel: { fontSize: 12, color: '#2ecc71', marginTop: 6 },
+  addToListButton: {
+    backgroundColor: '#E63946',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  addToListButtonDisabled: { opacity: 0.5 },
+  addToListButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

@@ -631,9 +631,131 @@ async def get_report_image(report_id: str):
         "image_url": image_url,
     }
 
-# ============ SCAN / IDENTIFY ENDPOINT ============
+# ============ ITEM IDENTIFICATION ENDPOINTS ============
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+@api_router.post("/identify-item")
+async def identify_item(request: Request):
+    """
+    Identifies a grocery/household item from a photo.
+    Used by the Home page "Capture Your Item" button.
+    """
+    user = await get_current_user(request)
+    body = await request.json()
+    image_base64 = body.get("image", "")
+    
+    if not image_base64:
+        raise HTTPException(status_code=400, detail="No image provided")
+    
+    # Strip data-URI prefix if present
+    if image_base64.startswith("data:"):
+        match = re.match(r"data:[^;]+;base64,(.+)", image_base64, re.DOTALL)
+        if match:
+            image_base64 = match.group(1)
+    
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"identify_{user.get('user_id', 'anon')}_{uuid.uuid4().hex[:8]}",
+            system_message="You are a grocery and household item identifier."
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        
+        prompt = (
+            "You are a grocery and household item identifier. "
+            "Look at this image and identify the item. "
+            "Respond with ONLY the item name in a short format suitable for a shopping list, "
+            "e.g. 'Anchor Butter 500g', 'Carib Lager 6-pack', 'Colgate Toothpaste'. "
+            "If you cannot identify a specific product, give a general name like 'Butter' or 'Toothpaste'. "
+            "Do not include any explanation, just the item name."
+        )
+        
+        image_content = ImageContent(image_base64=image_base64)
+        user_message = UserMessage(text=prompt, file_contents=[image_content])
+        
+        item_name = await chat.send_message(user_message)
+        item_name = item_name.strip()
+        
+        return {"item_name": item_name, "success": True}
+        
+    except Exception as e:
+        logger.error(f"Identify item error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI identification failed: {str(e)}")
+
+
+@api_router.post("/scan-price-tag")
+async def scan_price_tag(request: Request):
+    """
+    Reads a price tag image and extracts product + price.
+    Used by the Compare page "Tap to Compare" button.
+    """
+    user = await get_current_user(request)
+    body = await request.json()
+    image_base64 = body.get("image", "")
+    
+    if not image_base64:
+        raise HTTPException(status_code=400, detail="No image provided")
+    
+    # Strip data-URI prefix if present
+    if image_base64.startswith("data:"):
+        match = re.match(r"data:[^;]+;base64,(.+)", image_base64, re.DOTALL)
+        if match:
+            image_base64 = match.group(1)
+    
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"pricetag_{user.get('user_id', 'anon')}_{uuid.uuid4().hex[:8]}",
+            system_message="You are a price tag reader for a Trinidad & Tobago shopping app."
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        
+        prompt = (
+            "You are a price tag reader for a Trinidad & Tobago shopping app. "
+            "Read this price tag image and extract: "
+            "1. The product name "
+            "2. The store name (if visible) "
+            "3. The price (in TTD) "
+            "Respond ONLY in this exact JSON format with no extra text:\n"
+            '{"product_name": "...", "store_name": "...", "price": 0.00}\n'
+            "If a field is not visible, use null for that field. "
+            "Price must be a number, not a string."
+        )
+        
+        image_content = ImageContent(image_base64=image_base64)
+        user_message = UserMessage(text=prompt, file_contents=[image_content])
+        
+        raw = await chat.send_message(user_message)
+        raw = raw.strip()
+        
+        # Strip markdown fences if present
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        
+        # Parse JSON
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise HTTPException(status_code=422, detail="Could not parse price tag data")
+        
+        return {
+            "product_name": result.get("product_name"),
+            "store_name": result.get("store_name"),
+            "price": result.get("price"),
+            "success": True,
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Scan price tag error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI scan failed: {str(e)}")
+
+
+# ============ SCAN / IDENTIFY ENDPOINT ============
 
 @api_router.post(
     "/scan/identify",

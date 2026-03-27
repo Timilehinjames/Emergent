@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const C = {
   primary:      '#0277BD',
@@ -145,6 +146,7 @@ const SettingRow: React.FC<{
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
+  const { mode, toggleTheme } = useTheme();
 
   const [loading,        setLoading]        = useState(true);
   const [token,          setToken]          = useState<string | null>(null);
@@ -158,8 +160,8 @@ export default function ProfileScreen() {
   const [catchmentKm,    setCatchmentKm]    = useState(5);          // km radius
   const [regionModal,    setRegionModal]    = useState(false);
   const [notifEnabled,   setNotifEnabled]   = useState(true);
-  const [darkMode,       setDarkMode]       = useState(false);
   const [savingRegion,   setSavingRegion]   = useState(false);
+  const [showSignOutModal, setShowSignOutModal] = useState(false);
 
   // ── Load profile ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -241,17 +243,14 @@ export default function ProfileScreen() {
 
   // ── Sign out ───────────────────────────────────────────────────────────────
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          await AsyncStorage.multiRemove(['auth_token', 'user_name', 'user_email']);
-          router.replace('/auth/login');
-        },
-      },
-    ]);
+    // Use modal instead of Alert for cross-platform compatibility
+    setShowSignOutModal(true);
+  };
+
+  const confirmSignOut = async () => {
+    setShowSignOutModal(false);
+    await AsyncStorage.multiRemove(['auth_token', 'user_name', 'user_email']);
+    router.replace('/');
   };
 
   // ── Tier logic ─────────────────────────────────────────────────────────────
@@ -397,8 +396,8 @@ export default function ProfileScreen() {
             label="Dark Mode"
             rightElement={
               <Switch
-                value={darkMode}
-                onValueChange={setDarkMode}
+                value={mode === 'dark'}
+                onValueChange={toggleTheme}
                 trackColor={{ true: C.primary, false: C.border }}
                 testID="dark-mode-switch"
               />
@@ -442,6 +441,42 @@ export default function ProfileScreen() {
         onSelect={handleRegionSelect}
         onClose={() => setRegionModal(false)}
       />
+
+      {/* Sign Out Confirmation Modal */}
+      <Modal
+        visible={showSignOutModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowSignOutModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.signOutOverlay}
+          activeOpacity={1}
+          onPress={() => setShowSignOutModal(false)}
+        >
+          <View style={styles.signOutModalContainer}>
+            <Ionicons name="log-out-outline" size={40} color={C.error} style={{ marginBottom: 16 }} />
+            <Text style={styles.signOutModalTitle}>Sign Out</Text>
+            <Text style={styles.signOutModalText}>Are you sure you want to sign out?</Text>
+            
+            <View style={styles.signOutModalButtons}>
+              <TouchableOpacity
+                style={styles.signOutModalCancelBtn}
+                onPress={() => setShowSignOutModal(false)}
+              >
+                <Text style={styles.signOutModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.signOutModalConfirmBtn}
+                onPress={confirmSignOut}
+              >
+                <Text style={styles.signOutModalConfirmText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -607,4 +642,61 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   modalCancelText: { fontSize: 15, fontWeight: '600', color: C.textSec },
+
+  // Sign Out Modal
+  signOutOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  signOutModalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '85%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  signOutModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: C.text,
+    marginBottom: 8,
+  },
+  signOutModalText: {
+    fontSize: 14,
+    color: C.textSec,
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  signOutModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  signOutModalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+  },
+  signOutModalCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: C.text,
+  },
+  signOutModalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: C.error,
+    alignItems: 'center',
+  },
+  signOutModalConfirmText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
 });

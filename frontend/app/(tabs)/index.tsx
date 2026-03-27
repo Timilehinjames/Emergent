@@ -425,6 +425,7 @@ export default function HomeScreen() {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [detectedItem, setDetectedItem] = useState<string | null>(null);
+  const [showCaptureOptions, setShowCaptureOptions] = useState(false);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -643,28 +644,8 @@ export default function HomeScreen() {
   };
 
   const handleCaptureOption = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Cancel', '📷 Take Photo', '🖼️ Choose from Gallery'],
-          cancelButtonIndex: 0,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 1) handleTakePhoto();
-          if (buttonIndex === 2) handlePickFromGallery();
-        }
-      );
-    } else {
-      Alert.alert(
-        'Capture Your Item',
-        'How would you like to add your item?',
-        [
-          { text: '📷 Take Photo', onPress: handleTakePhoto },
-          { text: '🖼️ Choose from Gallery', onPress: handlePickFromGallery },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
-    }
+    // Show capture options modal (works on all platforms including web)
+    setShowCaptureOptions(true);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -824,6 +805,54 @@ export default function HomeScreen() {
             <Text style={styles.addToListButtonText}>+ Add to Shopping List</Text>
           </TouchableOpacity>
         </View>
+      </Modal>
+
+      {/* ── Capture Options Modal ───────────────────────────────────────────── */}
+      <Modal
+        visible={showCaptureOptions}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowCaptureOptions(false)}
+      >
+        <TouchableOpacity
+          style={styles.captureOptionsOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCaptureOptions(false)}
+        >
+          <View style={styles.captureOptionsContainer}>
+            <Text style={styles.captureOptionsTitle}>Capture Your Item</Text>
+            <Text style={styles.captureOptionsSubtitle}>How would you like to add your item?</Text>
+            
+            <TouchableOpacity
+              style={styles.captureOptionBtn}
+              onPress={() => {
+                setShowCaptureOptions(false);
+                handleTakePhoto();
+              }}
+            >
+              <Ionicons name="camera" size={24} color="#E63946" />
+              <Text style={styles.captureOptionText}>📷 Take Photo</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.captureOptionBtn}
+              onPress={() => {
+                setShowCaptureOptions(false);
+                handlePickFromGallery();
+              }}
+            >
+              <Ionicons name="images" size={24} color="#3b82f6" />
+              <Text style={styles.captureOptionText}>🖼️ Choose from Gallery</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.captureOptionCancelBtn}
+              onPress={() => setShowCaptureOptions(false)}
+            >
+              <Text style={styles.captureOptionCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -1068,4 +1097,58 @@ const styles = StyleSheet.create({
   },
   addToListButtonDisabled: { opacity: 0.5 },
   addToListButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  // Capture Options Modal
+  captureOptionsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  captureOptionsContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '85%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  captureOptionsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a2e',
+    marginBottom: 8,
+  },
+  captureOptionsSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  captureOptionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    width: '100%',
+    marginBottom: 12,
+    gap: 12,
+  },
+  captureOptionText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a2e',
+  },
+  captureOptionCancelBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginTop: 8,
+  },
+  captureOptionCancelText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '600',
+  },
 });
